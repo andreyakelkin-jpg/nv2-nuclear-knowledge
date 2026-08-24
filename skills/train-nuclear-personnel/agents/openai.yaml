@@ -1,0 +1,4 @@
+interface:
+  display_name: "Обучение атомной отрасли"
+  short_description: "Обучение и проверка знаний по нормативам"
+  default_prompt: "Use $train-nuclear-personnel to create or assess a role-based training module."

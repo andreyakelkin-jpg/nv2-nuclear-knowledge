@@ -1,0 +1,4 @@
+interface:
+  display_name: "Поиск по нормативной базе"
+  short_description: "Доказательный поиск по нормативной базе"
+  default_prompt: "Use $query-nuclear-knowledge to answer a normative question with verified citations."

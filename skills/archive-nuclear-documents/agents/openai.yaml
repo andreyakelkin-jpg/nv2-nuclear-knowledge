@@ -1,0 +1,4 @@
+interface:
+  display_name: "Архивариус нормативов"
+  short_description: "Загрузка и индексация нормативных документов"
+  default_prompt: "Use $archive-nuclear-documents to archive and index an attached normative document."

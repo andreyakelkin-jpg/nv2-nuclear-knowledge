@@ -1,0 +1,4 @@
+interface:
+  display_name: "Советник атомного производства"
+  short_description: "Ролевые решения по нормативам производства"
+  default_prompt: "Use $advise-nuclear-production to analyze a production decision for the requested role."
