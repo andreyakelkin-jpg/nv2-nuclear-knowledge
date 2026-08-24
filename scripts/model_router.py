@@ -111,9 +111,9 @@ def _context_level(context_chars: int) -> str:
 
 
 def _tools_level(tool_count: int) -> str:
-    if tool_count <= 1:
+    if tool_count <= 2:
         return "low"
-    if tool_count <= 3:
+    if tool_count <= 8:
         return "medium"
     return "high"
 
@@ -157,7 +157,6 @@ def assess_route(
     if ambiguity == "high": hard_sol.append("high_ambiguity")
     if criticality == "high": hard_sol.append("high_error_criticality")
     if context == "high": hard_sol.append("large_context")
-    if tools == "high": hard_sol.append("many_tools")
     if side_effects == "external": hard_sol.append("external_side_effects")
     if confidence < 0.75: hard_sol.append("low_confidence")
 
@@ -173,9 +172,10 @@ def assess_route(
         and (
             (medium_count >= 4 and confidence < 0.85)
             or 60000 <= context_chars <= 80000
-            or tool_count == 3
             or 0.75 <= confidence < 0.80
             or (side_effects == "local" and medium_count >= 3)
+            or (tools == "high" and ambiguity == "medium" and confidence < 0.85)
+            or (tools == "high" and side_effects == "local")
         )
     )
 
@@ -191,6 +191,8 @@ def assess_route(
     else:
         selected_index = 1
         reasons.append("balanced_default")
+        if tools == "high":
+            reasons.append("bounded_read_only_tool_volume")
 
     route_confidence = 0.98 if hard_sol or strictly_luna else 0.86
     if borderline_sol:

@@ -1,0 +1,39 @@
+schema_version: 1
+name: nv2-routing-simple-questions-regression-v1
+cases:
+- id: simple-safety-class-definition
+  question: Что такое класс безопасности?
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 8000, tool_count: 2, side_effects: none, confidence: 0.94}
+- id: simple-quality-category-definition
+  question: Как определяется «категория обеспечения качества»?
+  expected_tier: terra
+  assessment: {complexity: low, ambiguity: medium, criticality: low, context_chars: 10000, tool_count: 2, side_effects: none, confidence: 0.90}
+- id: simple-conformity-forms
+  question: Какие бывают формы оценки соответствия?
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 8000, tool_count: 2, side_effects: none, confidence: 0.94}
+- id: simple-pipeline-group-method
+  question: Как определяется группа трубопровода А, В или С?
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: low, context_chars: 12000, tool_count: 3, side_effects: none, confidence: 0.90}
+- id: simple-pipeline-group-check
+  question: Как проверяется принадлежность трубопровода к группе АВС?
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: low, context_chars: 12000, tool_count: 3, side_effects: none, confidence: 0.90}
+- id: simple-pipeline-group-differences
+  question: В чем отличие групп А, В и С?
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: low, context_chars: 12000, tool_count: 3, side_effects: none, confidence: 0.91}
+- id: simple-weld-category-method
+  question: Как определяется категория сварного соединения?
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: low, context_chars: 12000, tool_count: 3, side_effects: none, confidence: 0.89}
+- id: simple-project-bc-label
+  question: Что означает в проекте «Правила групп B/C»?
+  expected_tier: terra
+  assessment: {complexity: low, ambiguity: medium, criticality: low, context_chars: 10000, tool_count: 2, side_effects: none, confidence: 0.86}
+- id: simple-independent-batch
+  question: Восемь независимых вопросов выше одним списком.
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 24000, tool_count: 24, side_effects: none, confidence: 0.92}

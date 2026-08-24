@@ -21,11 +21,25 @@ from model_router import assess_route, non_inferiority_gate, validate_answer_tex
 
 class DeterministicRoutingTests(unittest.TestCase):
     def test_representative_cases_select_expected_tier(self) -> None:
-        dataset = yaml.safe_load((PLUGIN_ROOT / "evals/routing-cases.yaml").read_text(encoding="utf-8"))
-        for case in dataset["cases"]:
-            with self.subTest(case=case["id"]):
-                route = assess_route(**case["assessment"])
-                self.assertEqual(case["expected_tier"], route["tier"])
+        datasets = ("routing-cases.yaml", "routing-regression-simple-questions.yaml")
+        for dataset_name in datasets:
+            dataset = yaml.safe_load((PLUGIN_ROOT / f"evals/{dataset_name}").read_text(encoding="utf-8"))
+            for case in dataset["cases"]:
+                with self.subTest(dataset=dataset_name, case=case["id"]):
+                    route = assess_route(**case["assessment"])
+                    self.assertEqual(case["expected_tier"], route["tier"])
+
+    def test_bounded_retrieval_volume_does_not_force_sol(self) -> None:
+        two_calls = assess_route(
+            complexity="low", ambiguity="low", criticality="low", context_chars=8000,
+            tool_count=2, side_effects="none", confidence=0.94,
+        )
+        four_calls = assess_route(
+            complexity="low", ambiguity="medium", criticality="low", context_chars=8000,
+            tool_count=4, side_effects="none", confidence=0.92,
+        )
+        self.assertEqual("luna", two_calls["tier"])
+        self.assertEqual("terra", four_calls["tier"])
 
     def test_borderline_is_bumped_to_sol(self) -> None:
         route = assess_route(

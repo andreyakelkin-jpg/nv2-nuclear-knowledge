@@ -11,8 +11,13 @@ PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_R
 `KB_ROOT` from the current project.
 
 Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Exact,
-single-document lookups may qualify for Luna/low; applicability, conflicts, or incomplete evidence are
-high-criticality and must route to Sol/high.
+single-document lookups may qualify for Luna/low. Do not classify a question as high-criticality merely
+because it concerns nuclear regulation. Generic definitions, lists, distinctions, and explanations of how
+a class, group, category, or conformity form is determined are informational: use Luna/low when bounded
+to one clear source, otherwise Terra/medium. Use Sol/high for applying rules to a concrete product or
+project, making a safety/compliance decision, resolving conflicting evidence, or material uncertainty that
+could change such a decision. Route independent questions separately; exclude routing, validation, and
+logging calls from `tool_count`.
 
 ## Workflow
 
