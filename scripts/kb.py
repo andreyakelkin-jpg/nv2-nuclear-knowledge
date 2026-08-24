@@ -19,7 +19,15 @@ from typing import Any
 import yaml
 
 from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root
-from reference_resolver import queue_key, queue_score, reference_role, synchronize_references
+from reference_resolver import (
+    canonical_identifier,
+    identifier_from_id,
+    queue_key,
+    queue_score,
+    reference_role,
+    synchronize_references,
+)
+from retrieval import archive_context, build_retrieval_indexes, fetch_document, print_json, search_documents
 
 
 ROOT = resolve_kb_root()
@@ -226,16 +234,36 @@ def build_indexes() -> dict[str, int]:
     }
     generated_queue: dict[str, dict[str, Any]] = {}
     generated_replacements: dict[str, dict[str, Any]] = {}
+    indexed_at = now()
     for path in document_files():
         metadata, _ = front_matter(path)
         doc_id = str(metadata["id"])
         source = metadata.get("source", {})
+        exact, family = canonical_identifier(str(metadata.get("short_title") or metadata.get("title") or doc_id))
+        fallback_exact, fallback_family = identifier_from_id(doc_id)
+        relations = metadata.get("relations", {})
+        verification = metadata.get("verification", {})
         documents.append({
             "id": doc_id, "path": relative(path), "status": metadata.get("status", "требует_проверки"),
             "lifecycle_stage": metadata.get("lifecycle", {}).get("stage", "requires_expert_review"),
-            "type": metadata.get("type"), "title": metadata.get("title"),
+            "type": metadata.get("type"), "title": metadata.get("title"), "short_title": metadata.get("short_title"),
+            "issuer": metadata.get("issuer"), "effective_from": metadata.get("effective_from"),
+            "revision_date": metadata.get("revision_date"),
             "categories": metadata.get("category", []), "source_available": bool(source.get("original_file")),
-            "source_sha256": source.get("sha256"), "indexed_at": now(),
+            "applies_to": metadata.get("applies_to", []),
+            "normalized_path": source.get("normalized_file"),
+            "source_sha256": source.get("sha256"),
+            "verification": {
+                "legal_status": verification.get("legal_status"),
+                "legal_status_checked_on": verification.get("legal_status_checked_on"),
+                "legal_status_source": verification.get("legal_status_source"),
+                "reviewed_by": verification.get("reviewed_by"),
+                "reviewed_on": verification.get("reviewed_on"),
+            },
+            "replaces": relations.get("replaces", []), "replaced_by": relations.get("replaced_by", []),
+            "related_documents": relations.get("related_documents", []),
+            "canonical_exact": exact or fallback_exact, "canonical_family": family or fallback_family,
+            "indexed_at": indexed_at,
         })
         for number, reference in enumerate(metadata.get("references", []), 1):
             item = dict(reference)
@@ -319,12 +347,17 @@ def build_indexes() -> dict[str, int]:
     write_yaml(META / "addition-queue.yaml", {"queue": queue_output})
     write_yaml(META / "replacements.yaml", {"replacements": replacements_output})
     write_yaml(META / "impact-index.yaml", {"impacts": sorted(impacts.values(), key=lambda value: value["document_id"])})
+    retrieval_summary = build_retrieval_indexes(ROOT, documents, indexed_at)
     write_yaml(META / "corpus-manifest.yaml", {
-        "schema_version": 2, "last_indexed_at": now(), "document_count": len(documents),
+        "schema_version": 2, "last_indexed_at": indexed_at, "document_count": len(documents),
         "reference_count": len(references),
+        "retrieval_index": retrieval_summary,
         "context_policy": "В LLM передаются карточки, реестры и релевантные фрагменты, а не весь корпус.",
     })
-    return {"documents": len(documents), "references": len(references), "queue": len(queue_output)}
+    return {
+        "documents": len(documents), "references": len(references), "queue": len(queue_output),
+        "clauses": retrieval_summary["clauses"], "pages": retrieval_summary["pages"],
+    }
 
 
 def validate_base() -> tuple[list[str], list[str]]:
@@ -390,11 +423,14 @@ def command_rebuild_index(_: argparse.Namespace) -> None:
     sync = synchronize_references(ROOT)
     summary = build_indexes()
     print(f"Синхронизировано ссылок: {sync['resolved_references']}; изменено карточек: {sync['changed_documents']}")
-    print(f"Индексы обновлены: документов {summary['documents']}, ссылок {summary['references']}, очередь {summary['queue']}")
+    print(
+        f"Индексы обновлены: документов {summary['documents']}, ссылок {summary['references']}, "
+        f"пунктов {summary['clauses']}, страниц {summary['pages']}, очередь {summary['queue']}"
+    )
 
 
 def command_sync(_: argparse.Namespace) -> None:
-    tracked = [*document_files(), *META.glob("*.yaml")]
+    tracked = [*document_files(), *META.glob("*.yaml"), *META.glob("*.json")]
     before = snapshot(tracked)
     try:
         sync = synchronize_references(ROOT)
@@ -456,7 +492,10 @@ def command_apply(args: argparse.Namespace) -> None:
     normalized_path = ROOT / "normalized" / f"{doc_id}.txt"
     if destination_md.exists() and not args.replace:
         raise FileExistsError(f"Карточка уже существует: {relative(destination_md)}. Для новой редакции используйте новый id.")
-    tracked = [destination_md, raw_path, normalized_path, *document_files(), META / "impact-index.yaml", *META.glob("*.yaml")]
+    tracked = [
+        destination_md, raw_path, normalized_path, *document_files(), META / "impact-index.yaml",
+        *META.glob("*.yaml"), *META.glob("*.json"), META / "clause-index.json", META / "search-index.json",
+    ]
     before = snapshot(tracked)
     try:
         if new_category and category not in known_categories():
@@ -492,6 +531,32 @@ def command_apply(args: argparse.Namespace) -> None:
     print(f"Готово: {relative(destination_md)}")
     print(f"Автоматически обновлено: реестры, очередь, карта влияния и проверка целостности.")
     if warnings: print("Есть предупреждения — смотрите reports/integrity-latest.yaml")
+
+
+def command_search(args: argparse.Namespace) -> None:
+    print_json(search_documents(ROOT, args.query, limit=args.limit, max_chars=args.max_chars))
+
+
+def command_fetch(args: argparse.Namespace) -> None:
+    print_json(fetch_document(
+        ROOT,
+        args.document,
+        clause_values=args.clauses,
+        page_values=args.pages,
+        query=args.query,
+        context_lines=args.context_lines,
+        max_chars=args.max_chars,
+    ))
+
+
+def command_archive_context(args: argparse.Namespace) -> None:
+    print_json(archive_context(
+        ROOT,
+        args.stage_id,
+        query=args.query,
+        references=args.reference,
+        max_chars=args.max_chars,
+    ))
 
 
 def command_status(_: argparse.Namespace) -> None:
@@ -538,6 +603,28 @@ def main() -> None:
     apply.set_defaults(func=command_apply)
     rebuild = commands.add_parser("rebuild-index", help="Пересобрать производные реестры")
     rebuild.set_defaults(func=command_rebuild_index)
+    search = commands.add_parser("search", help="Найти документы и вернуть компактный JSON")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=6, help="Число результатов (1–20)")
+    search.add_argument("--max-chars", type=int, default=12000, help="Предельный размер JSON (1000–50000)")
+    search.add_argument("--format", choices=("json",), default="json")
+    search.set_defaults(func=command_search)
+    fetch = commands.add_parser("fetch", help="Извлечь точные пункты, страницы или поисковые окна")
+    fetch.add_argument("document", help="ID или обозначение документа")
+    fetch.add_argument("--clauses", action="append", help="Пункты через запятую; параметр можно повторять")
+    fetch.add_argument("--pages", action="append", help="Страницы и диапазоны через запятую, например 3,5-7")
+    fetch.add_argument("--query", help="Текст для поиска в нормализованном документе")
+    fetch.add_argument("--context-lines", type=int, default=2, help="Строки контекста вокруг совпадения")
+    fetch.add_argument("--max-chars", type=int, default=12000, help="Предельный объём текста фрагментов")
+    fetch.add_argument("--format", choices=("json",), default="json")
+    fetch.set_defaults(func=command_fetch)
+    context = commands.add_parser("archive-context", help="Собрать компактный контекст для Архивария")
+    context.add_argument("stage_id")
+    context.add_argument("--query", help="Запрос для поиска возможных дублей")
+    context.add_argument("--reference", action="append", help="Нормативная ссылка; можно повторять или перечислять через запятую")
+    context.add_argument("--max-chars", type=int, default=16000, help="Предельный размер JSON (2000–50000)")
+    context.add_argument("--format", choices=("json",), default="json")
+    context.set_defaults(func=command_archive_context)
     sync = commands.add_parser("sync", help="Синхронизировать ссылки и привести в порядок очередь")
     sync.set_defaults(func=command_sync)
     validate = commands.add_parser("validate", help="Проверить структуру и связи")

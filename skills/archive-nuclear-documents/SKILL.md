@@ -12,12 +12,18 @@ PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_R
 
 ## Workflow
 
-1. Read `KB_ROOT/prompts/archivist.md`, `KB_ROOT/docs/_templates/normative-document.md`, and the current files in `KB_ROOT/meta/`.
-2. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb stage
+1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb stage
    <source>` unless the attachment is already staged.
-3. Inspect extraction quality. For scans, tables, footnotes, appendices, or suspicious OCR, compare rendered pages with extracted text before analysis.
-4. Create the complete Markdown card and `decision.yaml` under `KB_ROOT/generated/<stage_id>/`.
-5. Extract every normative mention. Follow [references/reference-contract.md](references/reference-contract.md).
+2. Run `... run.ps1 kb archive-context <stage-id> --max-chars 16000`. This is the default source for
+   categories, duplicate candidates, corpus state, and resource paths. Do not read every file in
+   `KB_ROOT/meta/`.
+3. Read the archivist prompt and card template named in that compact context. Inspect extraction quality.
+   For scans, tables, footnotes, appendices, or suspicious OCR, compare rendered pages with extracted text.
+4. Extract every normative mention. Resolve them in bounded batches with repeated
+   `... run.ps1 kb archive-context <stage-id> --reference "<designation>" --max-chars 16000` calls and
+   follow [references/reference-contract.md](references/reference-contract.md). Do not load the full
+   cross-reference or addition-queue registry.
+5. Create the complete Markdown card and `decision.yaml` under `KB_ROOT/generated/<stage_id>/`.
 6. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb apply
    <decision.yaml>`. This must synchronize prior references, rebuild indexes, prioritize the queue,
    build replacements, and validate integrity atomically.
