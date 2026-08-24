@@ -158,23 +158,23 @@ def assess_route(
     if criticality == "high": hard_sol.append("high_error_criticality")
     if context == "high": hard_sol.append("large_context")
     if side_effects == "external": hard_sol.append("external_side_effects")
-    if confidence < 0.75: hard_sol.append("low_confidence")
+    if confidence < 0.60: hard_sol.append("low_confidence")
 
     strictly_luna = (
         complexity == ambiguity == criticality == "low"
         and context == tools == "low"
         and side_effects == "none"
-        and confidence >= 0.90
+        and confidence >= 0.85
     )
     medium_count = sum(value == "medium" for value in (complexity, ambiguity, criticality, context, tools))
     borderline_sol = (
         not hard_sol
         and (
-            (medium_count >= 4 and confidence < 0.85)
+            (medium_count >= 4 and confidence < 0.75)
             or 60000 <= context_chars <= 80000
-            or 0.75 <= confidence < 0.80
+            or (0.60 <= confidence < 0.65 and medium_count >= 2)
             or (side_effects == "local" and medium_count >= 3)
-            or (tools == "high" and ambiguity == "medium" and confidence < 0.85)
+            or (tools == "high" and ambiguity == "medium" and confidence < 0.75)
             or (tools == "high" and side_effects == "local")
         )
     )

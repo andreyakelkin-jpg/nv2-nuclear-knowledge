@@ -21,7 +21,11 @@ from model_router import assess_route, non_inferiority_gate, validate_answer_tex
 
 class DeterministicRoutingTests(unittest.TestCase):
     def test_representative_cases_select_expected_tier(self) -> None:
-        datasets = ("routing-cases.yaml", "routing-regression-simple-questions.yaml")
+        datasets = (
+            "routing-cases.yaml",
+            "routing-regression-simple-questions.yaml",
+            "routing-regression-external-run.yaml",
+        )
         for dataset_name in datasets:
             dataset = yaml.safe_load((PLUGIN_ROOT / f"evals/{dataset_name}").read_text(encoding="utf-8"))
             for case in dataset["cases"]:
@@ -40,6 +44,21 @@ class DeterministicRoutingTests(unittest.TestCase):
         )
         self.assertEqual("luna", two_calls["tier"])
         self.assertEqual("terra", four_calls["tier"])
+
+    def test_pre_retrieval_evidence_uncertainty_stays_on_terra(self) -> None:
+        route = assess_route(
+            complexity="medium", ambiguity="medium", criticality="low", context_chars=9000,
+            tool_count=2, side_effects="none", confidence=0.72,
+        )
+        self.assertEqual("terra", route["tier"])
+
+    def test_truly_low_confidence_ambiguous_task_stays_on_sol(self) -> None:
+        route = assess_route(
+            complexity="medium", ambiguity="high", criticality="medium", context_chars=8000,
+            tool_count=2, side_effects="none", confidence=0.55,
+        )
+        self.assertEqual("sol", route["tier"])
+        self.assertIn("low_confidence", route["reason"])
 
     def test_borderline_is_bumped_to_sol(self) -> None:
         route = assess_route(

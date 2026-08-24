@@ -1,0 +1,28 @@
+schema_version: 1
+name: nv2-routing-external-run-regression-v1
+description: Assessment values observed in the 2026-08-24 external plugin run.
+cases:
+- id: observed-safety-class
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 6000, tool_count: 2, side_effects: none, confidence: 0.85}
+- id: observed-quality-category
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 8000, tool_count: 2, side_effects: none, confidence: 0.78}
+- id: observed-conformity-forms
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 8000, tool_count: 2, side_effects: none, confidence: 0.78}
+- id: observed-pipeline-group
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 9000, tool_count: 2, side_effects: none, confidence: 0.76}
+- id: observed-pipeline-membership
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: medium, context_chars: 9000, tool_count: 2, side_effects: none, confidence: 0.74}
+- id: observed-group-differences
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 9000, tool_count: 2, side_effects: none, confidence: 0.76}
+- id: observed-weld-category
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 9000, tool_count: 2, side_effects: none, confidence: 0.72}
+- id: observed-project-bc-label
+  expected_tier: sol
+  assessment: {complexity: medium, ambiguity: high, criticality: medium, context_chars: 8000, tool_count: 2, side_effects: none, confidence: 0.55}

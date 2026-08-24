@@ -19,6 +19,13 @@ project, making a safety/compliance decision, resolving conflicting evidence, or
 could change such a decision. Route independent questions separately; exclude routing, validation, and
 logging calls from `tool_count`.
 
+For an ordinary informational lookup, `confidence` measures confidence in this routing classification,
+not whether the normative answer is already known. Do not reduce it because search/fetch has not run.
+Use answer validation to detect missing evidence and escalate once only after a Luna or Terra draft fails.
+If the user requests a model calibration or comparison, follow the calibration mode in the shared protocol
+and actually run every requested tier; a table of production routing choices alone is not a model-quality
+comparison.
+
 ## Workflow
 
 1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb search
