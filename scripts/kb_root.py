@@ -10,7 +10,8 @@ import yaml
 
 
 ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_KB_ROOT"
-CONFIG_PATH = Path.home() / ".codex" / "nv2-nuclear-knowledge.yaml"
+CONFIG_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_CONFIG_PATH"
+CONFIG_PATH = Path(os.environ.get(CONFIG_ENVIRONMENT_VARIABLE, Path.home() / ".codex" / "nv2-nuclear-knowledge.yaml"))
 SUPPORTED_SCHEMA_VERSION = 2
 REQUIRED_PATHS = (
     Path("docs"),
@@ -21,7 +22,7 @@ REQUIRED_PATHS = (
 )
 
 
-def _read_config() -> dict[str, Any]:
+def read_config() -> dict[str, Any]:
     if not CONFIG_PATH.is_file():
         return {}
     loaded = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
@@ -52,7 +53,7 @@ def validate_kb_root(value: str | Path) -> Path:
 def resolve_kb_root() -> Path:
     configured = os.environ.get(ENVIRONMENT_VARIABLE)
     if not configured:
-        configured = _read_config().get("kb_root")
+        configured = read_config().get("kb_root")
     if not configured:
         raise FileNotFoundError(
             f"Нормативная база не подключена. Укажите {ENVIRONMENT_VARIABLE} или создайте {CONFIG_PATH}"
@@ -62,9 +63,22 @@ def resolve_kb_root() -> Path:
 
 def write_config(root: str | Path) -> Path:
     validated = validate_kb_root(root)
+    config = read_config()
+    config["kb_root"] = str(validated)
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(
-        yaml.safe_dump({"kb_root": str(validated)}, allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return CONFIG_PATH
+
+
+def update_config(values: dict[str, Any]) -> Path:
+    config = read_config()
+    config.update(values)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
     return CONFIG_PATH

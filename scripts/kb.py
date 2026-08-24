@@ -19,6 +19,15 @@ from typing import Any
 import yaml
 
 from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root
+from model_router import (
+    apply_quality_gate,
+    check_route,
+    claim_side_effects,
+    escalate_route,
+    routing_status,
+    set_routing_enabled,
+    start_route,
+)
 from reference_resolver import (
     canonical_identifier,
     identifier_from_id,
@@ -26,6 +35,14 @@ from reference_resolver import (
     queue_score,
     reference_role,
     synchronize_references,
+)
+from reference_store import (
+    REFERENCE_SCHEMA_VERSION,
+    attach_reference_graph,
+    externalize_all,
+    load_references,
+    reference_path,
+    write_references,
 )
 from retrieval import archive_context, build_retrieval_indexes, fetch_document, print_json, search_documents
 
@@ -81,6 +98,20 @@ def front_matter(path: Path) -> tuple[dict[str, Any], str]:
 def document_files() -> list[Path]:
     docs = ROOT / "docs"
     return sorted(path for path in docs.rglob("*.md") if "_templates" not in path.parts)
+
+
+def reference_files() -> list[Path]:
+    return sorted((ROOT / "relations" / "references").glob("*.yaml"))
+
+
+def expected_reference_files() -> list[Path]:
+    paths: list[Path] = []
+    for path in document_files():
+        metadata, _ = front_matter(path)
+        doc_id = str(metadata.get("id", ""))
+        if SAFE_ID.fullmatch(doc_id):
+            paths.append(reference_path(ROOT, doc_id))
+    return paths
 
 
 def known_categories() -> set[str]:
@@ -238,6 +269,7 @@ def build_indexes() -> dict[str, int]:
     for path in document_files():
         metadata, _ = front_matter(path)
         doc_id = str(metadata["id"])
+        document_references = load_references(ROOT, metadata, allow_legacy=True)
         source = metadata.get("source", {})
         exact, family = canonical_identifier(str(metadata.get("short_title") or metadata.get("title") or doc_id))
         fallback_exact, fallback_family = identifier_from_id(doc_id)
@@ -262,10 +294,11 @@ def build_indexes() -> dict[str, int]:
             },
             "replaces": relations.get("replaces", []), "replaced_by": relations.get("replaced_by", []),
             "related_documents": relations.get("related_documents", []),
+            "reference_graph": metadata.get("reference_graph", {"count": len(document_references)}),
             "canonical_exact": exact or fallback_exact, "canonical_family": family or fallback_family,
             "indexed_at": indexed_at,
         })
-        for number, reference in enumerate(metadata.get("references", []), 1):
+        for number, reference in enumerate(document_references, 1):
             item = dict(reference)
             item.update({"id": f"ref-{doc_id}-{number:03d}", "source_document": doc_id})
             references.append(item)
@@ -351,6 +384,7 @@ def build_indexes() -> dict[str, int]:
     write_yaml(META / "corpus-manifest.yaml", {
         "schema_version": 2, "last_indexed_at": indexed_at, "document_count": len(documents),
         "reference_count": len(references),
+        "reference_storage_schema": 1,
         "retrieval_index": retrieval_summary,
         "context_policy": "В LLM передаются карточки, реестры и релевантные фрагменты, а не весь корпус.",
     })
@@ -387,7 +421,12 @@ def validate_base() -> tuple[list[str], list[str]]:
                 errors.append(f"{doc_id}: рабочее применение без источника проверки статуса")
             if not verification.get("reviewed_by"):
                 errors.append(f"{doc_id}: рабочее применение без проверяющего эксперта")
-        for number, reference in enumerate(metadata.get("references", []), 1):
+        try:
+            document_references = load_references(ROOT, metadata, allow_legacy=False)
+        except Exception as error:
+            errors.append(f"{doc_id}: граф ссылок — {error}")
+            document_references = []
+        for number, reference in enumerate(document_references, 1):
             status = reference.get("status")
             if status not in VALID_REFERENCE_STATUSES:
                 errors.append(f"{doc_id}: ссылка {number}, неверный статус {status!r}")
@@ -405,9 +444,16 @@ def validate_base() -> tuple[list[str], list[str]]:
                 errors.append(f"{doc_id}: битая Markdown-ссылка {link}")
     for path in document_files():
         metadata, _ = front_matter(path)
-        for reference in metadata.get("references", []):
+        try:
+            document_references = load_references(ROOT, metadata, allow_legacy=False)
+        except Exception:
+            continue
+        for reference in document_references:
             if reference.get("status") == "в_базе" and reference.get("target_document") not in ids:
                 errors.append(f"{metadata.get('id')}: цель ссылки отсутствует: {reference.get('target_document')}")
+    expected_graphs = {reference_path(ROOT, doc_id).resolve() for doc_id in ids if SAFE_ID.fullmatch(doc_id)}
+    for orphan in sorted({path.resolve() for path in reference_files()} - expected_graphs):
+        errors.append(f"Граф ссылок без карточки: {relative(orphan)}")
     if confidence_missing:
         warnings.append(f"Для {confidence_missing} ссылок уверенность ещё не оценена")
     return errors, warnings
@@ -430,7 +476,10 @@ def command_rebuild_index(_: argparse.Namespace) -> None:
 
 
 def command_sync(_: argparse.Namespace) -> None:
-    tracked = [*document_files(), *META.glob("*.yaml"), *META.glob("*.json")]
+    tracked = [
+        *document_files(), *reference_files(), *expected_reference_files(),
+        *META.glob("*.yaml"), *META.glob("*.json"),
+    ]
     before = snapshot(tracked)
     try:
         sync = synchronize_references(ROOT)
@@ -458,6 +507,35 @@ def command_validate(_: argparse.Namespace) -> None:
     print("Проверка пройдена.")
 
 
+def command_migrate_references(args: argparse.Namespace) -> None:
+    tracked = [
+        *document_files(), *reference_files(), *expected_reference_files(),
+        *META.glob("*.yaml"), *META.glob("*.json"),
+    ]
+    if args.dry_run:
+        summary = externalize_all(ROOT, write=False)
+        print_json({key: value for key, value in summary.items() if key != "results"})
+        return
+    before = snapshot(tracked)
+    try:
+        migration = externalize_all(ROOT, write=True)
+        sync = synchronize_references(ROOT)
+        summary = build_indexes()
+        errors, warnings = validate_base()
+        if errors:
+            raise ValueError("; ".join(errors))
+        write_validation_report(errors, warnings)
+    except Exception:
+        restore(before)
+        raise
+    print_json({
+        "migration": {key: value for key, value in migration.items() if key != "results"},
+        "reference_sync": sync,
+        "indexes": summary,
+        "warnings": warnings,
+    })
+
+
 def command_apply(args: argparse.Namespace) -> None:
     decision_path = Path(args.decision).resolve()
     decision = read_yaml(decision_path)
@@ -475,7 +553,25 @@ def command_apply(args: argparse.Namespace) -> None:
     metadata, body = front_matter(markdown_path)
     if metadata.get("id") != doc_id: raise ValueError("id карточки не совпадает с document_id")
     if category not in metadata.get("category", []): raise ValueError("категория отсутствует во фронтматтере")
-    for reference in metadata.get("references", []):
+    legacy_references = metadata.pop("references", None)
+    references_file = decision.get("references_file")
+    if references_file:
+        references_path = (ROOT / str(references_file)).resolve()
+        if not references_path.is_file() or ROOT.resolve() not in references_path.parents:
+            raise ValueError("references_file должен находиться в репозитории")
+        references_payload = read_yaml(references_path)
+        if references_payload.get("schema_version") != REFERENCE_SCHEMA_VERSION:
+            raise ValueError("references_file содержит неподдерживаемую версию схемы")
+        if references_payload.get("document_id") not in {None, doc_id}:
+            raise ValueError("document_id в references_file не совпадает с decision.yaml")
+        document_references = references_payload.get("references", [])
+        if legacy_references is not None and legacy_references != document_references:
+            raise ValueError("references в карточке расходятся с references_file")
+    else:
+        document_references = legacy_references or []
+    if not isinstance(document_references, list) or any(not isinstance(item, dict) for item in document_references):
+        raise ValueError("references_file должен содержать массив объектов references")
+    for reference in document_references:
         if reference.get("status") not in VALID_REFERENCE_STATUSES:
             raise ValueError(f"Некорректный статус ссылки: {reference.get('status')}")
     new_category = decision.get("new_category")
@@ -490,10 +586,12 @@ def command_apply(args: argparse.Namespace) -> None:
     destination_md = ROOT / "docs" / category / type_slug / f"{doc_id}.md"
     raw_path = ROOT / "raw" / category / type_slug / f"{doc_id}{source_files[0].suffix.lower()}"
     normalized_path = ROOT / "normalized" / f"{doc_id}.txt"
+    destination_references = reference_path(ROOT, doc_id)
     if destination_md.exists() and not args.replace:
         raise FileExistsError(f"Карточка уже существует: {relative(destination_md)}. Для новой редакции используйте новый id.")
     tracked = [
-        destination_md, raw_path, normalized_path, *document_files(), META / "impact-index.yaml",
+        destination_md, raw_path, normalized_path, destination_references,
+        *document_files(), *reference_files(), *expected_reference_files(), META / "impact-index.yaml",
         *META.glob("*.yaml"), *META.glob("*.json"), META / "clause-index.json", META / "search-index.json",
     ]
     before = snapshot(tracked)
@@ -511,6 +609,9 @@ def command_apply(args: argparse.Namespace) -> None:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_files[0], raw_path)
         shutil.copy2(stage_dir / "extracted.txt", normalized_path)
+        metadata.pop("reference_graph", None)
+        write_references(ROOT, doc_id, document_references)
+        attach_reference_graph(ROOT, metadata, document_references)
         destination_md.write_text(markdown_with_front_matter(metadata, body), encoding="utf-8")
         sync = synchronize_references(ROOT)
         summary = build_indexes()
@@ -559,6 +660,53 @@ def command_archive_context(args: argparse.Namespace) -> None:
     ))
 
 
+def command_route(args: argparse.Namespace) -> None:
+    print_json(start_route(
+        ROOT,
+        task_fingerprint=args.task_id,
+        complexity=args.complexity,
+        ambiguity=args.ambiguity,
+        criticality=args.criticality,
+        context_chars=args.context_chars,
+        tool_count=args.tool_count,
+        side_effects=args.side_effects,
+        confidence=args.confidence,
+    ))
+
+
+def command_route_check(args: argparse.Namespace) -> None:
+    print_json(check_route(
+        ROOT,
+        args.run_id,
+        answer_path=Path(args.answer).resolve(),
+        contract_path=Path(args.contract).resolve(),
+        input_path=Path(args.input).resolve() if args.input else None,
+        input_tokens=args.input_tokens,
+        output_tokens=args.output_tokens,
+        latency_ms=args.latency_ms,
+    ))
+
+
+def command_route_escalate(args: argparse.Namespace) -> None:
+    print_json(escalate_route(ROOT, args.run_id))
+
+
+def command_route_claim(args: argparse.Namespace) -> None:
+    print_json(claim_side_effects(ROOT, args.run_id, args.operation_id))
+
+
+def command_routing_status(_: argparse.Namespace) -> None:
+    print_json(routing_status(ROOT))
+
+
+def command_routing_config(args: argparse.Namespace) -> None:
+    print_json(set_routing_enabled(ROOT, args.enabled == "enable"))
+
+
+def command_routing_gate(args: argparse.Namespace) -> None:
+    print_json(apply_quality_gate(ROOT, Path(args.comparisons).resolve()))
+
+
 def command_status(_: argparse.Namespace) -> None:
     manifest = read_yaml(META / "corpus-manifest.yaml")
     pending = [
@@ -603,6 +751,9 @@ def main() -> None:
     apply.set_defaults(func=command_apply)
     rebuild = commands.add_parser("rebuild-index", help="Пересобрать производные реестры")
     rebuild.set_defaults(func=command_rebuild_index)
+    migrate = commands.add_parser("migrate-references", help="Вынести подробные ссылки из карточек в отдельные файлы")
+    migrate.add_argument("--dry-run", action="store_true", help="Показать объём миграции без изменений")
+    migrate.set_defaults(func=command_migrate_references)
     search = commands.add_parser("search", help="Найти документы и вернуть компактный JSON")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=6, help="Число результатов (1–20)")
@@ -625,6 +776,40 @@ def main() -> None:
     context.add_argument("--max-chars", type=int, default=16000, help="Предельный размер JSON (2000–50000)")
     context.add_argument("--format", choices=("json",), default="json")
     context.set_defaults(func=command_archive_context)
+    route = commands.add_parser("route", help="Детерминированно выбрать worker-модель и открыть журналируемый run")
+    route.add_argument("--task-id", required=True, help="Нечувствительный идентификатор задачи; в журнал попадёт только SHA-256")
+    route.add_argument("--complexity", required=True, choices=("low", "medium", "high"))
+    route.add_argument("--ambiguity", required=True, choices=("low", "medium", "high"))
+    route.add_argument("--criticality", required=True, choices=("low", "medium", "high"))
+    route.add_argument("--context-chars", required=True, type=int)
+    route.add_argument("--tool-count", required=True, type=int)
+    route.add_argument("--side-effects", required=True, choices=("none", "local", "external"))
+    route.add_argument("--confidence", required=True, type=float)
+    route.set_defaults(func=command_route)
+    route_check = commands.add_parser("route-check", help="Проверить ответ и решить вопрос об однократной эскалации")
+    route_check.add_argument("run_id")
+    route_check.add_argument("--answer", required=True)
+    route_check.add_argument("--contract", required=True)
+    route_check.add_argument("--input")
+    route_check.add_argument("--input-tokens", type=int)
+    route_check.add_argument("--output-tokens", type=int)
+    route_check.add_argument("--latency-ms", type=int)
+    route_check.set_defaults(func=command_route_check)
+    route_escalate = commands.add_parser("route-escalate", help="Один раз повысить уровень после провала проверки")
+    route_escalate.add_argument("run_id")
+    route_escalate.set_defaults(func=command_route_escalate)
+    route_claim = commands.add_parser("route-claim", help="Однократно разрешить побочное действие после успешной проверки")
+    route_claim.add_argument("run_id")
+    route_claim.add_argument("--operation-id", required=True, help="Нечувствительный idempotency key; журналируется только SHA-256")
+    route_claim.set_defaults(func=command_route_claim)
+    routing_status_parser = commands.add_parser("routing-status", help="Показать feature flag и quality gate")
+    routing_status_parser.set_defaults(func=command_routing_status)
+    routing_config = commands.add_parser("routing-config", help="Включить или отключить каскадную маршрутизацию")
+    routing_config.add_argument("enabled", choices=("enable", "disable"))
+    routing_config.set_defaults(func=command_routing_config)
+    routing_gate = commands.add_parser("routing-gate", help="Применить статистическое сравнение с Sol-baseline")
+    routing_gate.add_argument("comparisons")
+    routing_gate.set_defaults(func=command_routing_gate)
     sync = commands.add_parser("sync", help="Синхронизировать ссылки и привести в порядок очередь")
     sync.set_defaults(func=command_sync)
     validate = commands.add_parser("validate", help="Проверить структуру и связи")

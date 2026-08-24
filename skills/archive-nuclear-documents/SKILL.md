@@ -10,6 +10,10 @@ knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
 PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
 `KB_ROOT` from the current project.
 
+Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Treat
+archiving, replacement, OCR ambiguity, and reference resolution as high-criticality. Workers prepare drafts;
+only the controlling agent may call `kb apply`, once, after validation succeeds.
+
 ## Workflow
 
 1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb stage
@@ -23,7 +27,9 @@ PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_R
    `... run.ps1 kb archive-context <stage-id> --reference "<designation>" --max-chars 16000` calls and
    follow [references/reference-contract.md](references/reference-contract.md). Do not load the full
    cross-reference or addition-queue registry.
-5. Create the complete Markdown card and `decision.yaml` under `KB_ROOT/generated/<stage_id>/`.
+5. Create the compact Markdown card, detailed `references.yaml`, and `decision.yaml` under
+   `KB_ROOT/generated/<stage_id>/`. Put `references_file` in the decision; never put the full references
+   array in the card.
 6. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb apply
    <decision.yaml>`. This must synchronize prior references, rebuild indexes, prioritize the queue,
    build replacements, and validate integrity atomically.

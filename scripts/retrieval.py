@@ -562,6 +562,9 @@ def archive_context(
         {"id": item.get("id"), "title": item.get("title"), "description": item.get("description")}
         for item in read_yaml(root / "meta" / "categories.yaml").get("categories", [])
     ]
+    plugin_reference = Path(__file__).resolve().parents[1] / "skills" / "archive-nuclear-documents" / "references" / "reference-contract.md"
+    if not plugin_reference.is_file():
+        plugin_reference = root / "plugin-src" / "skills" / "archive-nuclear-documents" / "references" / "reference-contract.md"
     result: dict[str, Any] = {
         "stage": {
             key: manifest.get(key)
@@ -574,7 +577,7 @@ def archive_context(
         "resources": {
             "archivist_prompt": "prompts/archivist.md",
             "card_template": "docs/_templates/normative-document.md",
-            "reference_contract": ".agents/skills/archive-nuclear-documents/references/reference-contract.md",
+            "reference_contract": str(plugin_reference.resolve()),
         },
         "corpus": read_yaml(root / "meta" / "corpus-manifest.yaml"),
         "categories": categories,

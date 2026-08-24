@@ -57,7 +57,13 @@ class RetrievalCliTests(unittest.TestCase):
             "verification": {"legal_status": "требует_проверки"},
             "lifecycle": {"stage": "requires_expert_review"},
             "relations": {"replaces": [], "replaced_by": [], "related_documents": []},
-            "references": [],
+            "references": [{
+                "cited_as": "ГОСТ 9.999",
+                "status": "отсутствует",
+                "location": "п. 1.1",
+                "reference_role": "normative_standard",
+                "confidence": "not_assessed",
+            }],
         }
         yaml_text = yaml.safe_dump(card, allow_unicode=True, sort_keys=False)
         (self.root / "docs/design/gost/gost-1-2-2024.md").write_text(
@@ -72,7 +78,7 @@ class RetrievalCliTests(unittest.TestCase):
             "characters_extracted": 1000,
         })
         (self.root / "staging/stage-1/extracted.txt").write_text("ГОСТ 1.2-2024", encoding="utf-8")
-        self.run_cli("rebuild-index", json_output=False)
+        self.run_cli("migrate-references")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -105,6 +111,34 @@ class RetrievalCliTests(unittest.TestCase):
         self.assertEqual([1, 2], [item["page"] for item in indexed["pages"]])
         self.assertIn("1.1", [item["clause"] for item in indexed["clauses"]])
         self.assertEqual("gost-1-2-2024", search_index["documents"][0]["id"])
+
+    def test_migration_moves_references_out_of_card(self) -> None:
+        card_text = (self.root / "docs/design/gost/gost-1-2-2024.md").read_text(encoding="utf-8")
+        metadata = yaml.safe_load(card_text.split("---", 2)[1])
+        graph = yaml.safe_load(
+            (self.root / "relations/references/gost-1-2-2024.yaml").read_text(encoding="utf-8")
+        )
+        self.assertNotIn("references", metadata)
+        self.assertEqual(1, metadata["reference_graph"]["count"])
+        self.assertEqual("ГОСТ 9.999", graph["references"][0]["cited_as"])
+
+    def test_validation_rejects_tampered_reference_summary(self) -> None:
+        card = self.root / "docs/design/gost/gost-1-2-2024.md"
+        text = card.read_text(encoding="utf-8").replace("  count: 1\n", "  count: 999\n", 1)
+        card.write_text(text, encoding="utf-8")
+        environment = os.environ.copy()
+        environment["NV2_NUCLEAR_KB_ROOT"] = str(self.root)
+        environment["PYTHONUTF8"] = "1"
+        completed = subprocess.run(
+            [sys.executable, str(KB_SCRIPT), "validate"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("reference_graph", completed.stdout + completed.stderr)
 
     def test_search_prefers_exact_designation(self) -> None:
         result = self.run_cli("search", "ГОСТ 1.2-2024", "--limit", "3", "--max-chars", "3000")

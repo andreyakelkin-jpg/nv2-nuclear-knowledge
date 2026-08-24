@@ -1,0 +1,288 @@
+schema_version: 1
+dataset: nv2-routing-representative-v1
+comparisons:
+- id: luna-exact-status
+  routed_model: gpt-5.6-luna/low
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: luna-exact-scope
+  routed_model: gpt-5.6-luna/low
+  routed_score: 0.958333
+  sol_score: 0.958333
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 0.75
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 0.75
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: luna-clause-fetch
+  routed_model: gpt-5.6-luna/low
+  routed_score: 0.944444
+  sol_score: 0.944444
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 0.6666666666666666
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 0.6666666666666666
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: luna-json-lookup
+  routed_model: gpt-5.6-luna/low
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: terra-compare-welding
+  routed_model: gpt-5.6-terra/medium
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: terra-conformity-package
+  routed_model: gpt-5.6-terra/medium
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: terra-acceptance-summary
+  routed_model: gpt-5.6-terra/medium
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: terra-design-brief
+  routed_model: gpt-5.6-terra/medium
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: terra-replacement-chain
+  routed_model: gpt-5.6-terra/medium
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-material-substitution
+  routed_model: gpt-5.6-sol/high
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-conflicting-editions
+  routed_model: gpt-5.6-sol/high
+  routed_score: 0.966667
+  sol_score: 0.966667
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 0.8
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 0.8
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-applicability-gap
+  routed_model: gpt-5.6-sol/high
+  routed_score: 0.958333
+  sol_score: 0.958333
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 0.75
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 0.75
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-archive-plan
+  routed_model: gpt-5.6-sol/high
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-legal-evidence
+  routed_model: gpt-5.6-sol/high
+  routed_score: 0.933333
+  sol_score: 0.933333
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 0.6
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 0.6
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+- id: sol-ocr-table
+  routed_model: gpt-5.6-sol/high
+  routed_score: 1.0
+  sol_score: 1.0
+  routed_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+  sol_dimensions:
+    completeness: 1.0
+    requirements: 1.0
+    sections: 1.0
+    factual_grounding: 1.0
+    forbidden_claims: 1.0
+    format: 1.0
+tokens:
+  input: 0
+  output: 4210
+  total: 4210
+  source: reported_and_estimated
+  routed:
+    input: 0
+    output: 2239
+    total: 2239
+  sol_baseline:
+    input: 0
+    output: 1971
+    total: 1971
+  output_delta_routed_minus_sol: 268
+latency_ms: 0

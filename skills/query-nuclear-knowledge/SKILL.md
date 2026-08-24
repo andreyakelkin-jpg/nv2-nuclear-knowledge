@@ -10,6 +10,10 @@ knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
 PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
 `KB_ROOT` from the current project.
 
+Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Exact,
+single-document lookups may qualify for Luna/low; applicability, conflicts, or incomplete evidence are
+high-criticality and must route to Sol/high.
+
 ## Workflow
 
 1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb search

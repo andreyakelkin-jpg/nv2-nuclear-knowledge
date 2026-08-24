@@ -1,0 +1,151 @@
+schema_version: 1
+name: nv2-routing-representative-v1
+cases:
+- id: luna-exact-status
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 3000, tool_count: 1, side_effects: none, confidence: 0.96}
+  prompt: >-
+    Определи статус и стадию проверки ГОСТ 15.016-2016 в локальной нормативной базе. Ответь двумя предложениями с ID источника.
+  contract:
+    min_chars: 70
+    required_strings: [действует, requires_expert_review]
+    evidence_ids: [gost-15-016-2016]
+    format: text
+- id: luna-exact-scope
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 3500, tool_count: 1, side_effects: none, confidence: 0.95}
+  prompt: >-
+    Для чего применяется НП-104-18? Дай одно краткое предложение и ID карточки.
+  contract:
+    min_chars: 60
+    required_strings: [изготовление, монтаж, ремонт, свар]
+    evidence_ids: [np-104-18]
+    format: text
+- id: luna-clause-fetch
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 5000, tool_count: 1, side_effects: none, confidence: 0.94}
+  prompt: >-
+    Кратко передай смысл пункта 6.1.1 ГОСТ 15.016-2016 и укажи пункт и ID карточки. Не делай выводов за пределами фрагмента.
+  contract:
+    min_chars: 100
+    required_strings: [6.1.1, потребител, не допускается]
+    evidence_ids: [gost-15-016-2016]
+    format: text
+- id: luna-json-lookup
+  expected_tier: luna
+  assessment: {complexity: low, ambiguity: low, criticality: low, context_chars: 4000, tool_count: 1, side_effects: none, confidence: 0.97}
+  prompt: >-
+    Найди основной документ базы об испытаниях и приемке выпускаемой продукции. Верни только JSON с полями id, designation, status.
+  contract:
+    min_chars: 40
+    required_strings: [ГОСТ 15.309-98, действует]
+    evidence_ids: [gost-15-309-98]
+    format: json
+- id: terra-compare-welding
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: medium, context_chars: 22000, tool_count: 2, side_effects: none, confidence: 0.88}
+  prompt: >-
+    Сопоставь область применения НП-104-18 и НП-089-15. Кратко объясни, почему документы нельзя считать взаимозаменяемыми. Укажи ID источников и статус предварительности.
+  contract:
+    min_chars: 220
+    required_strings: [свар, 'групп А, В и С', предвар]
+    evidence_ids: [np-104-18, np-089-15]
+    format: text
+- id: terra-conformity-package
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: medium, context_chars: 28000, tool_count: 2, side_effects: none, confidence: 0.87}
+  prompt: >-
+    Составь краткий пакет источников для анализа оценки соответствия продукции атомной отрасли: назови базовое правило и постановление Правительства из базы, раздели их роли и отметь ограничения статуса карточек.
+  contract:
+    min_chars: 240
+    required_strings: [правил, постановлен, requires_expert_review, предвар]
+    evidence_ids: [np-071-18, pp-rf-544-2016]
+    format: text
+- id: terra-acceptance-summary
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: medium, context_chars: 18000, tool_count: 2, side_effects: none, confidence: 0.90}
+  prompt: >-
+    Подготовь краткое нормативное резюме по испытаниям и приемке выпускаемой продукции: основной источник, область применения и оговорка о стадии экспертной проверки.
+  contract:
+    min_chars: 180
+    required_strings: [испытан, приемк, requires_expert_review]
+    evidence_ids: [gost-15-309-98]
+    format: text
+- id: terra-design-brief
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: medium, criticality: low, context_chars: 26000, tool_count: 2, side_effects: none, confidence: 0.86}
+  prompt: >-
+    Сформируй короткую записку конструктору: какой документ базы использовать для содержания ТЗ на ОКР, область применения и почему вывод пока предварительный.
+  contract:
+    min_chars: 180
+    required_strings: [ТЗ, ОКР, предвар]
+    evidence_ids: [gost-15-016-2016]
+    format: text
+- id: terra-replacement-chain
+  expected_tier: terra
+  assessment: {complexity: medium, ambiguity: low, criticality: medium, context_chars: 18000, tool_count: 2, side_effects: none, confidence: 0.89}
+  prompt: >-
+    Покажи зафиксированную в базе цепочку замены для ГОСТ Р 15.301-2016 и назови старый документ. Не утверждай официальный правовой статус сверх карточки.
+  contract:
+    min_chars: 140
+    required_strings: [замен, карточк]
+    evidence_ids: [gost-r-15-301-2016, gost-r-15-201-2000]
+    format: text
+- id: sol-material-substitution
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: high, criticality: high, context_chars: 65000, tool_count: 3, side_effects: none, confidence: 0.62}
+  prompt: >-
+    Можно ли без дополнительного согласования заменить материал детали трубопроводной арматуры АЭС на аналог? Дай безопасную предварительную позицию, перечисли недостающие параметры и нормативные источники для проверки.
+  contract:
+    min_chars: 320
+    required_strings: [нельзя, согласован, материал, предвар, эксперт]
+    evidence_ids: [np-089-15, np-104-18]
+    format: text
+- id: sol-conflicting-editions
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: high, criticality: high, context_chars: 70000, tool_count: 3, side_effects: none, confidence: 0.68}
+  prompt: >-
+    Проект ссылается на ГОСТ Р 50.05.02-2018, а в базе есть редакция 2022 года. Опиши безопасный порядок разрешения конфликта без автоматической замены договорного требования.
+  contract:
+    min_chars: 300
+    required_strings: ['2018', '2022', договор, провер, согласован]
+    evidence_ids: [gost-r-50-05-02-2022]
+    format: text
+- id: sol-applicability-gap
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: high, criticality: high, context_chars: 55000, tool_count: 3, side_effects: none, confidence: 0.60}
+  prompt: >-
+    Определи, достаточно ли НП-071-18 для выбора формы оценки соответствия конкретной арматуры АЭС, если класс безопасности и договорные требования не указаны.
+  contract:
+    min_chars: 260
+    required_strings: [недостаточно, класс безопасности, договор, предвар]
+    evidence_ids: [np-071-18]
+    format: text
+- id: sol-archive-plan
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: medium, criticality: high, context_chars: 90000, tool_count: 5, side_effects: local, confidence: 0.72}
+  prompt: >-
+    Опиши план безопасного архивирования новой редакции нормативного документа при подозрительном OCR и возможном дубле. Ничего не изменяй; укажи контрольные точки до применения.
+  contract:
+    min_chars: 300
+    required_strings: [OCR, дубл, оригинал, провер, до примен]
+    forbidden_strings: [уже архивирован]
+    format: text
+- id: sol-legal-evidence
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: high, criticality: high, context_chars: 42000, tool_count: 3, side_effects: external, confidence: 0.66}
+  prompt: >-
+    Можно ли считать пользовательское подтверждение статуса карточки достаточным официальным доказательством действующей редакции? Объясни границу доказательств и безопасный следующий шаг.
+  contract:
+    min_chars: 260
+    required_strings: [недостаточно, пользователь, официаль, источник, провер]
+    format: text
+- id: sol-ocr-table
+  expected_tier: sol
+  assessment: {complexity: high, ambiguity: high, criticality: medium, context_chars: 110000, tool_count: 4, side_effects: none, confidence: 0.58}
+  prompt: >-
+    В извлечённом тексте таблицы нормативного документа пропали единицы измерения и часть строк. Опиши, как ответить на вопрос по таблице без выдумывания данных и какие доказательства проверить.
+  contract:
+    min_chars: 260
+    required_strings: [таблиц, единиц, оригинал, OCR, нельзя]
+    format: text

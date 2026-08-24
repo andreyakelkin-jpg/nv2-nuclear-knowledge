@@ -10,6 +10,10 @@ knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
 PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
 `KB_ROOT` from the current project.
 
+Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Routine
+drafting may use Terra/medium; admission decisions, critical-error rules, and uncertain normative evidence
+are high-criticality and route to Sol/high.
+
 1. Define role, operation, competence, risk, initial level, and admission consequence.
 2. Use `$query-nuclear-knowledge` to select evidence. Generate formal assessment content only from expert-reviewed or approved sources; otherwise label it as a pilot draft.
 3. Build the chain `role → competence → operation → risk → normative clause → task`.

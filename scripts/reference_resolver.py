@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from reference_store import attach_reference_graph, load_references, write_references
+
 
 SPACE = re.compile(r"\s+")
 YEAR = re.compile(r"(?:19|20)\d{2}")
@@ -217,8 +219,9 @@ def synchronize_references(root: Path, write: bool = True) -> dict[str, Any]:
         if "_templates" in path.parts:
             continue
         metadata, body = _front_matter(path)
+        references = load_references(root, metadata, allow_legacy=True)
         changed = False
-        for reference in metadata.get("references", []):
+        for reference in references:
             label = str(reference.get("cited_as", ""))
             target, method, canonical = resolve_label(label, exact, families)
             role = reference_role(reference)
@@ -271,6 +274,8 @@ def synchronize_references(root: Path, write: bool = True) -> dict[str, Any]:
         if changed:
             changed_docs += 1
             if write:
+                write_references(root, str(metadata.get("id")), references)
+                attach_reference_graph(root, metadata, references)
                 _write_document(path, metadata, body)
     return {
         "changed_documents": changed_docs,

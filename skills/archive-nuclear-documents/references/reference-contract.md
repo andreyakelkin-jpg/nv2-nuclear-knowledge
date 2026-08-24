@@ -1,6 +1,14 @@
 # Reference contract
 
-For each normative mention record:
+Store the complete array in `generated/<stage_id>/references.yaml`, never in the Markdown card. Use:
+
+```yaml
+schema_version: 1
+document_id: "document-id"
+references: []
+```
+
+For each normative mention in `references`, record:
 
 ```yaml
 - cited_as: "Exact designation or title as printed"
