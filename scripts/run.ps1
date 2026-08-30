@@ -13,15 +13,37 @@ $OutputEncoding = $utf8Encoding
 $env:PYTHONUTF8 = '1'
 
 $pluginRoot = Split-Path -Parent $PSScriptRoot
-$userProfilePath = [Environment]::GetFolderPath('UserProfile')
-$bundledPython = Join-Path $userProfilePath '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
 $configuredPython = [Environment]::GetEnvironmentVariable('NV2_NUCLEAR_PYTHON')
+$userProfilePath = [Environment]::GetEnvironmentVariable('USERPROFILE')
+
+if ([string]::IsNullOrWhiteSpace($userProfilePath)) {
+    $userProfilePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+}
+
+if ([string]::IsNullOrWhiteSpace($userProfilePath)) {
+    $userProfilePath = [Environment]::GetEnvironmentVariable('HOME')
+}
+
+if ([string]::IsNullOrWhiteSpace($userProfilePath)) {
+    $homeDrive = [Environment]::GetEnvironmentVariable('HOMEDRIVE')
+    $homePath = [Environment]::GetEnvironmentVariable('HOMEPATH')
+    if ($homeDrive -and $homePath) {
+        $userProfilePath = $homeDrive + $homePath
+    }
+}
+
+$bundledPython = $null
+if (-not [string]::IsNullOrWhiteSpace($userProfilePath)) {
+    $bundledPython = Join-Path $userProfilePath '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+}
 
 $pythonCandidates = @()
 if ($configuredPython) {
     $pythonCandidates += $configuredPython
 }
-$pythonCandidates += $bundledPython
+if ($bundledPython) {
+    $pythonCandidates += $bundledPython
+}
 
 $pythonExecutable = $null
 foreach ($candidate in $pythonCandidates) {
