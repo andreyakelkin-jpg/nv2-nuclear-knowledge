@@ -104,13 +104,16 @@ class DeterministicRoutingTests(unittest.TestCase):
 class RoutingCliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        temporary_root = Path(self.temporary.name)
+        self.root = temporary_root / "knowledge-base"
+        self.state = temporary_root / "runtime-state"
+        self.state.mkdir(parents=True)
         for directory in ("docs", "raw", "normalized", "meta", "reports/model-routing"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         self._write_yaml(self.root / "meta/documents.yaml", {"documents": []})
         self._write_yaml(self.root / "meta/corpus-manifest.yaml", {"schema_version": 2})
         self._write_yaml(self.root / "reports/model-routing/gate-latest.yaml", {"status": "passed"})
-        self.config = self.root / "config.yaml"
+        self.config = temporary_root / "config.yaml"
         self._write_yaml(self.config, {
             "kb_root": str(self.root),
             "routing": {"enabled": True, "require_quality_gate": True, "minimum_eval_cases": 12},
@@ -119,6 +122,7 @@ class RoutingCliTests(unittest.TestCase):
         self.environment.update({
             "NV2_NUCLEAR_KB_ROOT": str(self.root),
             "NV2_NUCLEAR_CONFIG_PATH": str(self.config),
+            "NV2_NUCLEAR_STATE_ROOT": str(self.state),
             "PYTHONUTF8": "1",
         })
 
@@ -168,7 +172,10 @@ class RoutingCliTests(unittest.TestCase):
             "route-check", escalated["run_id"], "--answer", str(answer), "--contract", str(contract)
         )
         self.assertIsNone(second_check["escalate_once"])
-        events = [json.loads(line) for line in (self.root / "reports/model-routing/events.jsonl").read_text(encoding="utf-8").splitlines()]
+        events_path = self.state / "reports/model-routing/events.jsonl"
+        events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+        self.assertFalse((self.root / "reports/model-routing/events.jsonl").exists())
+        self.assertTrue((self.root / "reports/model-routing/gate-latest.yaml").is_file())
         final = events[-1]
         for field in ("model", "effort", "reason", "confidence", "escalation", "tokens", "latency_ms"):
             self.assertIn(field, final)

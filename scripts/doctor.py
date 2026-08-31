@@ -17,6 +17,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 CONFIG_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_CONFIG_PATH"
 KB_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_KB_ROOT"
+STATE_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_STATE_ROOT"
 DEFAULT_CONFIG = Path.home() / ".codex" / "nv2-nuclear-knowledge.yaml"
 REQUIRED_KB_PATHS = (
     Path("docs"),
@@ -167,6 +168,33 @@ def diagnose(*, allow_unconfigured: bool, skip_integrity: bool) -> dict[str, Any
                 warning = "Knowledge base is read-only; search works, but archiving is unavailable"
                 warnings.append(warning)
                 add_check(checks, "write-access", "warn", warning)
+
+            try:
+                scripts_root = str(PLUGIN_ROOT / "scripts")
+                if scripts_root not in sys.path:
+                    sys.path.insert(0, scripts_root)
+                from kb_root import resolve_state_root
+
+                state_root = resolve_state_root(root)
+                state_writable = os.access(state_root, os.W_OK)
+                add_check(
+                    checks,
+                    "runtime-state",
+                    "pass" if state_writable else "fail",
+                    (
+                        f"Runtime state is writable: {state_root}"
+                        if state_writable
+                        else f"Runtime state is not writable: {state_root}"
+                    ),
+                    path=str(state_root),
+                    source=(
+                        "environment"
+                        if os.environ.get(STATE_ENVIRONMENT_VARIABLE)
+                        else "config-or-knowledge-base-fallback"
+                    ),
+                )
+            except Exception as error:
+                add_check(checks, "runtime-state", "fail", f"Runtime state is unavailable: {error}")
 
             if not skip_integrity and not missing_dependencies:
                 try:

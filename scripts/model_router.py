@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from kb_root import read_config, update_config
+from kb_root import read_config, resolve_state_root, update_config
 
 
 LEVELS = {"low": 0, "medium": 1, "high": 2}
@@ -59,13 +59,13 @@ def _gate_path(root: Path) -> Path:
 
 
 def _log_path(root: Path) -> Path:
-    return root / "reports" / "model-routing" / "events.jsonl"
+    return resolve_state_root(root) / "reports" / "model-routing" / "events.jsonl"
 
 
 def _run_path(root: Path, run_id: str) -> Path:
     if not re.fullmatch(r"[a-f0-9-]{36}", run_id):
         raise ValueError("Некорректный run_id")
-    return root / "reports" / "model-routing" / "runs" / f"{run_id}.yaml"
+    return resolve_state_root(root) / "reports" / "model-routing" / "runs" / f"{run_id}.yaml"
 
 
 def _append_event(root: Path, event: dict[str, Any]) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -20,13 +21,16 @@ KB_SCRIPT = SCRIPTS / "kb.py"
 class PortableLauncherTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        temporary_root = Path(self.temporary.name)
+        self.root = temporary_root / "knowledge-base"
+        self.state = temporary_root / "runtime-state"
+        self.state.mkdir(parents=True)
         for directory in ("docs", "raw", "normalized", "meta", "reports"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         (self.root / "meta/documents.yaml").write_text("documents: []\n", encoding="utf-8")
         (self.root / "meta/categories.yaml").write_text("categories: []\n", encoding="utf-8")
         (self.root / "meta/corpus-manifest.yaml").write_text("schema_version: 2\n", encoding="utf-8")
-        self.config = self.root / "config.yaml"
+        self.config = temporary_root / "config.yaml"
         self.config.write_text(
             yaml.safe_dump({"kb_root": str(self.root)}, allow_unicode=True),
             encoding="utf-8",
@@ -36,6 +40,7 @@ class PortableLauncherTests(unittest.TestCase):
             {
                 "NV2_NUCLEAR_KB_ROOT": str(self.root),
                 "NV2_NUCLEAR_CONFIG_PATH": str(self.config),
+                "NV2_NUCLEAR_STATE_ROOT": str(self.state),
                 "NV2_NUCLEAR_PYTHON": sys.executable,
                 "PYTHONUTF8": "1",
             }
@@ -82,6 +87,7 @@ class PortableLauncherTests(unittest.TestCase):
         self.assertEqual("pass", statuses["plugin-package"])
         self.assertEqual("pass", statuses["dependencies"])
         self.assertEqual("pass", statuses["knowledge-base"])
+        self.assertEqual("pass", statuses["runtime-state"])
 
     def test_doctor_full_check_is_read_only(self) -> None:
         reports_before = sorted(path.relative_to(self.root) for path in self.root.rglob("*") if path.is_file())
@@ -90,6 +96,83 @@ class PortableLauncherTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertTrue(json.loads(completed.stdout)["ok"])
         self.assertEqual(reports_before, reports_after)
+
+    def test_read_commands_keep_corpus_unchanged_with_separate_runtime_state(self) -> None:
+        before = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        answer = self.state / "answer.txt"
+        contract = self.state / "contract.yaml"
+        answer.write_text("Проверенный ответ.", encoding="utf-8")
+        contract.write_text("min_chars: 1\n", encoding="utf-8")
+        paths = sorted(self.root.rglob("*"), key=lambda path: len(path.parts), reverse=True)
+        if os.name != "nt":
+            for path in paths:
+                path.chmod(stat.S_IRUSR | (stat.S_IXUSR if path.is_dir() else 0))
+            self.root.chmod(stat.S_IRUSR | stat.S_IXUSR)
+        try:
+            for command in (
+                [sys.executable, str(RUNNER), "doctor", "--json"],
+                [sys.executable, str(RUNNER), "kb", "status"],
+                [sys.executable, str(RUNNER), "kb", "search", "контроль"],
+                [sys.executable, str(RUNNER), "kb", "routing-status"],
+            ):
+                completed = self.run_command(command)
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            route = self.run_command(
+                [
+                    sys.executable,
+                    str(RUNNER),
+                    "kb",
+                    "route",
+                    "--task-id",
+                    "read-only-test",
+                    "--complexity",
+                    "low",
+                    "--ambiguity",
+                    "low",
+                    "--criticality",
+                    "low",
+                    "--context-chars",
+                    "100",
+                    "--tool-count",
+                    "0",
+                    "--side-effects",
+                    "none",
+                    "--confidence",
+                    "0.99",
+                ]
+            )
+            self.assertEqual(0, route.returncode, route.stdout + route.stderr)
+            run_id = json.loads(route.stdout)["run_id"]
+            checked = self.run_command(
+                [
+                    sys.executable,
+                    str(RUNNER),
+                    "kb",
+                    "route-check",
+                    run_id,
+                    "--answer",
+                    str(answer),
+                    "--contract",
+                    str(contract),
+                ]
+            )
+            self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
+        finally:
+            if os.name != "nt":
+                self.root.chmod(stat.S_IRWXU)
+                for path in reversed(paths):
+                    path.chmod(stat.S_IRWXU if path.is_dir() else stat.S_IRUSR | stat.S_IWUSR)
+        after = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+        self.assertTrue((self.state / "reports/model-routing/events.jsonl").is_file())
 
 
 @unittest.skipIf(sys.platform == "win32", "POSIX wrapper is tested on Linux CI")

@@ -571,6 +571,7 @@ def archive_context(
             for key in (
                 "stage_id", "state", "received_at", "source_name", "source_sha256", "source_extension",
                 "staged_source", "extracted_text", "extraction_method", "characters_extracted",
+                "security_status", "security_report", "security_report_sha256",
                 "requires_visual_review", "warning",
             )
         },

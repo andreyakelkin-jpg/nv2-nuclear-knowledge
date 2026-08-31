@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,9 @@ KB_SCRIPT = PLUGIN_ROOT / "scripts" / "kb.py"
 class RetrievalCliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
+        self.state_temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self.state = Path(self.state_temporary.name)
         for directory in ("docs/design/gost", "raw", "normalized", "meta", "staging/stage-1", "reports"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         self._write_yaml("meta/corpus-manifest.yaml", {"schema_version": 2, "last_indexed_at": None})
@@ -82,6 +85,7 @@ class RetrievalCliTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+        self.state_temporary.cleanup()
 
     def _write_yaml(self, relative_path: str, data: dict) -> None:
         path = self.root / relative_path
@@ -91,6 +95,7 @@ class RetrievalCliTests(unittest.TestCase):
     def run_cli(self, *args: str, json_output: bool = True):
         environment = os.environ.copy()
         environment["NV2_NUCLEAR_KB_ROOT"] = str(self.root)
+        environment["NV2_NUCLEAR_STATE_ROOT"] = str(self.state)
         environment["PYTHONUTF8"] = "1"
         completed = subprocess.run(
             [sys.executable, str(KB_SCRIPT), *args],
@@ -172,6 +177,33 @@ class RetrievalCliTests(unittest.TestCase):
         self.assertNotIn("FULL_REGISTRY_MUST_NOT_LEAK", serialized)
         self.assertNotIn("QUEUE_MUST_NOT_LEAK", serialized)
         self.assertEqual("gost-1-2-2024", result["reference_resolutions"][0]["target_document"])
+
+    def test_search_fetch_and_archive_context_are_read_only(self) -> None:
+        before = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        paths = sorted(self.root.rglob("*"), key=lambda path: len(path.parts), reverse=True)
+        if os.name != "nt":
+            for path in paths:
+                path.chmod(stat.S_IRUSR | (stat.S_IXUSR if path.is_dir() else 0))
+            self.root.chmod(stat.S_IRUSR | stat.S_IXUSR)
+        try:
+            self.run_cli("search", "ГОСТ 1.2-2024", "--limit", "3", "--max-chars", "3000")
+            self.run_cli("fetch", "gost-1-2-2024", "--clauses", "1.1", "--max-chars", "4000")
+            self.run_cli("archive-context", "stage-1", "--max-chars", "5000")
+        finally:
+            if os.name != "nt":
+                self.root.chmod(stat.S_IRWXU)
+                for path in reversed(paths):
+                    path.chmod(stat.S_IRWXU if path.is_dir() else stat.S_IRUSR | stat.S_IWUSR)
+        after = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,13 @@ from typing import Any
 
 import yaml
 
-from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root
+from document_security import (
+    create_security_report,
+    security_report_path,
+    sha256_file,
+    validate_security_report,
+)
+from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root, resolve_state_root
 from model_router import (
     apply_quality_gate,
     check_route,
@@ -45,9 +51,11 @@ from reference_store import (
     write_references,
 )
 from retrieval import archive_context, build_retrieval_indexes, fetch_document, print_json, search_documents
+from write_lock import exclusive_file_lock
 
 
 ROOT = resolve_kb_root()
+STATE_ROOT = resolve_state_root(ROOT)
 META = ROOT / "meta"
 VALID_REFERENCE_STATUSES = {
     "в_базе", "отсутствует", "устарел_есть_замена",
@@ -183,22 +191,26 @@ def staged_hashes() -> set[str]:
     return hashes
 
 
-def stage_document(source: Path) -> str:
+def stage_document(source: Path, security_report: Path | None = None) -> str:
     source = source.resolve()
     if not source.is_file():
         raise FileNotFoundError(f"Файл не найден: {source}")
     if source.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Неподдерживаемый формат {source.suffix}")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    digest = sha256_file(source)
     if digest in existing_hashes():
         return "ALREADY_ARCHIVED"
     if digest in staged_hashes():
         return "ALREADY_STAGED"
+    report_path = security_report.resolve() if security_report else security_report_path(STATE_ROOT, digest)
+    report = validate_security_report(source, report_path, allowed_root=STATE_ROOT)
     stage_id = f"{datetime.now():%Y%m%d-%H%M%S}-{digest[:10]}"
     stage_dir = ROOT / "staging" / stage_id
     stage_dir.mkdir(parents=True)
     staged_source = stage_dir / f"source{source.suffix.lower()}"
+    staged_security_report = stage_dir / "security-report.yaml"
     shutil.copy2(source, staged_source)
+    shutil.copy2(report_path, staged_security_report)
     text, method = extract_text(staged_source)
     (stage_dir / "extracted.txt").write_text(text, encoding="utf-8")
     write_yaml(stage_dir / "manifest.yaml", {
@@ -211,6 +223,9 @@ def stage_document(source: Path) -> str:
         "staged_source": relative(staged_source),
         "extracted_text": relative(stage_dir / "extracted.txt"),
         "extraction_method": method,
+        "security_status": report["verdict"]["status"],
+        "security_report": relative(staged_security_report),
+        "security_report_sha256": sha256_file(staged_security_report),
         "characters_extracted": len(text),
         "requires_visual_review": len(text.strip()) < 500,
         "warning": "Мало извлечённого текста: требуется OCR и визуальная проверка." if len(text.strip()) < 500 else None,
@@ -219,7 +234,10 @@ def stage_document(source: Path) -> str:
 
 
 def command_stage(args: argparse.Namespace) -> None:
-    result = stage_document(Path(args.source))
+    result = stage_document(
+        Path(args.source),
+        Path(args.security_report) if args.security_report else None,
+    )
     if result.startswith("ALREADY"):
         print("Документ уже есть в базе." if result == "ALREADY_ARCHIVED" else "Документ уже ожидает анализа.")
         return
@@ -238,6 +256,20 @@ def command_intake(_: argparse.Namespace) -> None:
             print(f"{source.name}: {result}")
         except Exception as error:
             print(f"{source.name}: ОШИБКА — {error}")
+
+
+def command_security_check(args: argparse.Namespace) -> None:
+    output, payload = create_security_report(
+        Path(args.source),
+        Path(args.scanner_report),
+        Path(args.semantic_report),
+        STATE_ROOT,
+    )
+    print_json({
+        "report": str(output),
+        "source_sha256": payload["source"]["sha256"],
+        "verdict": payload["verdict"],
+    })
 
 
 def snapshot(paths: list[Path]) -> dict[Path, bytes | None]:
@@ -536,7 +568,7 @@ def command_migrate_references(args: argparse.Namespace) -> None:
     })
 
 
-def command_apply(args: argparse.Namespace) -> None:
+def _command_apply_locked(args: argparse.Namespace) -> None:
     decision_path = Path(args.decision).resolve()
     decision = read_yaml(decision_path)
     required = {"stage_id", "document_id", "document_type", "category", "markdown_file"}
@@ -544,9 +576,12 @@ def command_apply(args: argparse.Namespace) -> None:
         raise ValueError(f"В decision.yaml отсутствуют поля: {', '.join(sorted(missing))}")
     doc_id, category = str(decision["document_id"]), str(decision["category"])
     if not SAFE_ID.fullmatch(doc_id): raise ValueError("document_id: только строчные латинские буквы, цифры и дефисы")
-    stage_dir = ROOT / "staging" / str(decision["stage_id"])
+    stage_id = str(decision["stage_id"])
+    if not SAFE_ID.fullmatch(stage_id): raise ValueError("Некорректный stage_id")
+    stage_dir = ROOT / "staging" / stage_id
     manifest = read_yaml(stage_dir / "manifest.yaml")
     if not manifest: raise ValueError("Не найдена стадия загрузки")
+    if manifest.get("stage_id") != stage_id: raise ValueError("stage_id в manifest не совпадает с decision.yaml")
     markdown_path = (ROOT / str(decision["markdown_file"])).resolve()
     if not markdown_path.is_file() or ROOT.resolve() not in markdown_path.parents:
         raise ValueError("markdown_file должен находиться в репозитории")
@@ -582,6 +617,18 @@ def command_apply(args: argparse.Namespace) -> None:
             if not new_category.get(field): raise ValueError(f"В new_category отсутствует {field}")
     source_files = list(stage_dir.glob("source.*"))
     if len(source_files) != 1: raise ValueError("В стадии должен быть один исходный файл")
+    security_report_file = stage_dir / "security-report.yaml"
+    security_report = validate_security_report(
+        source_files[0], security_report_file, allowed_root=stage_dir
+    )
+    if manifest.get("source_sha256") != security_report["source"]["sha256"]:
+        raise ValueError("SHA-256 исходника в manifest не совпадает с security report")
+    if manifest.get("security_status") != "security_passed":
+        raise ValueError("Manifest не подтверждает security_passed")
+    if manifest.get("security_report") != relative(security_report_file):
+        raise ValueError("Manifest указывает другой security report")
+    if manifest.get("security_report_sha256") != sha256_file(security_report_file):
+        raise ValueError("Security report был изменён после staging")
     type_slug = type_directory(str(decision["document_type"]))
     destination_md = ROOT / "docs" / category / type_slug / f"{doc_id}.md"
     raw_path = ROOT / "raw" / category / type_slug / f"{doc_id}{source_files[0].suffix.lower()}"
@@ -623,7 +670,9 @@ def command_apply(args: argparse.Namespace) -> None:
         raise
     report = {"archived_at": now(), "document_id": doc_id, "stage_id": manifest["stage_id"],
               "summary": summary, "reference_sync": sync, "warnings": warnings,
-              "lifecycle_stage": metadata["lifecycle"]["stage"]}
+              "lifecycle_stage": metadata["lifecycle"]["stage"],
+              "security_status": security_report["verdict"]["status"],
+              "security_report_sha256": manifest["security_report_sha256"]}
     manifest["state"] = "archived"
     manifest["archived_document_id"] = doc_id
     manifest["archived_at"] = report["archived_at"]
@@ -632,6 +681,11 @@ def command_apply(args: argparse.Namespace) -> None:
     print(f"Готово: {relative(destination_md)}")
     print(f"Автоматически обновлено: реестры, очередь, карта влияния и проверка целостности.")
     if warnings: print("Есть предупреждения — смотрите reports/integrity-latest.yaml")
+
+
+def command_apply(args: argparse.Namespace) -> None:
+    with exclusive_file_lock(ROOT / ".locks" / "apply.lock"):
+        _command_apply_locked(args)
 
 
 def command_search(args: argparse.Namespace) -> None:
@@ -742,9 +796,15 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     stage = commands.add_parser("stage", help="Подготовить один документ для AI-анализа")
     stage.add_argument("source")
+    stage.add_argument("--security-report", help="Проверенный security report; по умолчанию берётся из runtime-state")
     stage.set_defaults(func=command_stage)
     intake = commands.add_parser("intake", help="Подготовить все PDF/DOCX/TXT/MD из inbox")
     intake.set_defaults(func=command_intake)
+    security = commands.add_parser("security-check", help="Собрать fail-closed security report до staging")
+    security.add_argument("source")
+    security.add_argument("--scanner-report", required=True, help="YAML-отчёт локального антивирусного сканера")
+    security.add_argument("--semantic-report", required=True, help="YAML-отчёт Codex без инструментов и side effects")
+    security.set_defaults(func=command_security_check)
     apply = commands.add_parser("apply", help="Атомарно архивировать решение Архивария")
     apply.add_argument("decision")
     apply.add_argument("--replace", action="store_true", help="Разрешить замену существующей карточки")

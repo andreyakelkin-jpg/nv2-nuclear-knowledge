@@ -37,7 +37,10 @@ The installer records the external knowledge-base path in the per-user configura
 - Linux: `~/.codex/nv2-nuclear-knowledge.yaml`
 
 `NV2_NUCLEAR_CONFIG_PATH` overrides the configuration file and `NV2_NUCLEAR_KB_ROOT` overrides only the
-knowledge-base path. Never store machine-specific absolute paths in the plugin repository.
+knowledge-base path. `NV2_NUCLEAR_STATE_ROOT` overrides mutable runtime state (routing events, runs, and
+document security reports). It defaults to the knowledge-base root for backward-compatible writable desktop
+installations. On a server with a read-only corpus it must point to a separate existing writable directory.
+Never store machine-specific absolute paths in the plugin repository.
 
 ## Verification
 
@@ -53,7 +56,8 @@ weaken that fallback to make diagnostics pass.
 
 ## Multi-host operation
 
-Windows and Linux may use independent synchronized copies of the same knowledge base. If both hosts point
-to one shared filesystem, allow only one writer at a time: the current file-based implementation has no
-distributed lock. Use one designated writer or a reviewed Git synchronization workflow; concurrent
-`kb apply` operations from multiple hosts are unsupported.
+Windows and Linux may use independent synchronized copies of the same knowledge base. `kb apply` uses a
+non-blocking file lock to prevent overlapping writers that use this plugin on one supported filesystem.
+If several hosts point to one network filesystem, still designate one writer: lock propagation depends on
+the filesystem and there is no distributed lease or fencing. Concurrent `kb apply` operations from multiple
+hosts remain unsupported.

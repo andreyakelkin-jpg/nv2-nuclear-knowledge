@@ -39,6 +39,11 @@ The router enforces Luna/low only for bounded, unambiguous, low-risk work; Terra
 default; Sol/high handles hard, risky, ambiguous, large-context, and low-confidence work. Defined boundary
 bands are promoted one tier. Do not override the returned tier downward.
 
+The paired quality gate remains in the immutable knowledge-base release under
+`KB_ROOT/reports/model-routing/gate-latest.yaml`. Mutable events and run records are written under
+`NV2_NUCLEAR_STATE_ROOT/reports/model-routing/`; set a separate writable state root whenever `KB_ROOT` is
+mounted read-only.
+
 For calibration, treat `0.85` as sufficient routing confidence for an otherwise all-low Luna lookup.
 Confidence from `0.65` upward does not by itself promote a medium task beyond Terra. Values below `0.60`
 are fail-closed Sol; the narrow `0.60–0.65` band promotes a task with multiple medium dimensions.

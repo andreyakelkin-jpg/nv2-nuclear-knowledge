@@ -10,6 +10,7 @@ import yaml
 
 
 ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_KB_ROOT"
+STATE_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_STATE_ROOT"
 CONFIG_ENVIRONMENT_VARIABLE = "NV2_NUCLEAR_CONFIG_PATH"
 CONFIG_PATH = Path(os.environ.get(CONFIG_ENVIRONMENT_VARIABLE, Path.home() / ".codex" / "nv2-nuclear-knowledge.yaml"))
 SUPPORTED_SCHEMA_VERSION = 2
@@ -59,6 +60,25 @@ def resolve_kb_root() -> Path:
             f"Нормативная база не подключена. Укажите {ENVIRONMENT_VARIABLE} или создайте {CONFIG_PATH}"
         )
     return validate_kb_root(str(configured))
+
+
+def resolve_state_root(kb_root: Path | None = None) -> Path:
+    """Resolve mutable runtime state without creating or changing either root.
+
+    Existing desktop installations remain compatible: when no separate state
+    root is configured, runtime state stays under the writable knowledge base.
+    A server can point this variable at a writable workspace while mounting the
+    normative corpus read-only.
+    """
+    configured = os.environ.get(STATE_ENVIRONMENT_VARIABLE)
+    if not configured:
+        configured = read_config().get("state_root")
+    if configured:
+        root = Path(str(configured)).expanduser().resolve()
+        if not root.is_dir():
+            raise FileNotFoundError(f"Каталог runtime-state не найден: {root}")
+        return root
+    return kb_root.resolve() if kb_root is not None else resolve_kb_root()
 
 
 def write_config(root: str | Path) -> Path:
