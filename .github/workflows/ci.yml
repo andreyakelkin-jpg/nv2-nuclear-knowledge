@@ -17,8 +17,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -34,11 +34,11 @@ jobs:
       - name: Test Windows launcher
         if: runner.os == 'Windows'
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run.ps1 kb --help
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run.ps1 doctor --help
       - name: Validate Linux shell scripts
         if: runner.os == 'Linux'
         shell: bash
         run: |
           bash -n scripts/run.sh
           bash -n scripts/install.sh
-          NV2_NUCLEAR_PYTHON="$(command -v python)" sh scripts/run.sh kb --help
+          NV2_NUCLEAR_PYTHON="$(command -v python)" sh scripts/run.sh doctor --help

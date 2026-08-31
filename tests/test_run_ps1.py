@@ -22,13 +22,27 @@ class PowerShellLauncherTests(unittest.TestCase):
         if not powershell:
             self.skipTest("Windows PowerShell is not available")
 
-        environment = os.environ.copy()
-        environment["NV2_NUCLEAR_PYTHON"] = sys.executable
-        environment["PYTHONUTF8"] = "1"
-
         # Keep the foreign working directory inside the checkout so the test
-        # also runs under Codex's Windows sandbox identity.
-        with tempfile.TemporaryDirectory(prefix=".other-project-", dir=PLUGIN_ROOT) as other_project:
+        # also runs under Codex's Windows sandbox identity. An isolated minimal
+        # knowledge base prevents a developer's existing user configuration
+        # from masking missing environment propagation in CI.
+        with tempfile.TemporaryDirectory(prefix="nv2-wrapper-") as temporary:
+            root = Path(temporary) / "knowledge-base"
+            for directory in ("docs", "raw", "normalized", "meta", "reports"):
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            (root / "meta/documents.yaml").write_text("documents: []\n", encoding="utf-8")
+            (root / "meta/categories.yaml").write_text("categories: []\n", encoding="utf-8")
+            (root / "meta/corpus-manifest.yaml").write_text("schema_version: 2\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "NV2_NUCLEAR_KB_ROOT": str(root),
+                    "NV2_NUCLEAR_PYTHON": sys.executable,
+                    "PYTHONUTF8": "1",
+                }
+            )
+            other_project = Path(temporary) / "other-project"
+            other_project.mkdir()
             completed = subprocess.run(
                 [
                     powershell,

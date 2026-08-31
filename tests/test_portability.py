@@ -95,16 +95,29 @@ class PortableLauncherTests(unittest.TestCase):
 @unittest.skipIf(sys.platform == "win32", "POSIX wrapper is tested on Linux CI")
 class PosixLauncherTests(unittest.TestCase):
     def test_posix_wrapper_launches_portable_runner(self) -> None:
-        environment = os.environ.copy()
-        environment.update({"NV2_NUCLEAR_PYTHON": sys.executable, "PYTHONUTF8": "1"})
-        completed = subprocess.run(
-            ["sh", str(SCRIPTS / "run.sh"), "kb", "--help"],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=environment,
-        )
+        with tempfile.TemporaryDirectory(prefix="nv2-wrapper-") as temporary:
+            root = Path(temporary) / "knowledge-base"
+            for directory in ("docs", "raw", "normalized", "meta", "reports"):
+                (root / directory).mkdir(parents=True, exist_ok=True)
+            (root / "meta/documents.yaml").write_text("documents: []\n", encoding="utf-8")
+            (root / "meta/categories.yaml").write_text("categories: []\n", encoding="utf-8")
+            (root / "meta/corpus-manifest.yaml").write_text("schema_version: 2\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "NV2_NUCLEAR_KB_ROOT": str(root),
+                    "NV2_NUCLEAR_PYTHON": sys.executable,
+                    "PYTHONUTF8": "1",
+                }
+            )
+            completed = subprocess.run(
+                ["sh", str(SCRIPTS / "run.sh"), "kb", "--help"],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=environment,
+            )
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertIn("usage:", completed.stdout.lower())
 
