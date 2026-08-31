@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('kb', 'assess', 'configure')]
+    [ValidateSet('kb', 'assess', 'configure', 'doctor')]
     [string]$Action,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -64,11 +64,6 @@ if (-not $pythonExecutable) {
     throw 'Python was not found. Install Python 3 or set NV2_NUCLEAR_PYTHON.'
 }
 
-$scripts = @{
-    kb        = Join-Path $pluginRoot 'scripts\kb.py'
-    assess    = Join-Path $pluginRoot 'scripts\assess_training.py'
-    configure = Join-Path $pluginRoot 'scripts\configure.py'
-}
-
-& $pythonExecutable $scripts[$Action] @RemainingArgs
+$runner = Join-Path $pluginRoot 'scripts\run.py'
+& $pythonExecutable $runner $Action @RemainingArgs
 exit $LASTEXITCODE

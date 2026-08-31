@@ -27,11 +27,11 @@ Assess these fields explicitly before selecting a worker:
 
 Run:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb route `
-  --task-id <non-sensitive-id> --complexity <low|medium|high> `
-  --ambiguity <low|medium|high> --criticality <low|medium|high> `
-  --context-chars <n> --tool-count <n> --side-effects <none|local|external> `
+```text
+RUNNER kb route \
+  --task-id <non-sensitive-id> --complexity <low|medium|high> \
+  --ambiguity <low|medium|high> --criticality <low|medium|high> \
+  --context-chars <n> --tool-count <n> --side-effects <none|local|external> \
   --confidence <0..1>
 ```
 
@@ -71,8 +71,8 @@ easy.
 
 Save the draft and run:
 
-```powershell
-... run.ps1 kb route-check <run-id> --answer <answer-file> --contract <contract-file> `
+```text
+RUNNER kb route-check <run-id> --answer <answer-file> --contract <contract-file> \
   [--input <input-file>] [--input-tokens N --output-tokens N --latency-ms N]
 ```
 
@@ -82,12 +82,12 @@ model, effort, reason, route confidence, escalation, tokens, and latency without
 
 If accepted and the task has side effects, claim the operation before executing it:
 
-```powershell
-... run.ps1 kb route-claim <run-id> --operation-id <stable-idempotency-key>
+```text
+RUNNER kb route-claim <run-id> --operation-id <stable-idempotency-key>
 ```
 
 Execute only when this returns `execute_once: true`; the same run cannot be claimed again. If rejected
-and `escalate_once` is present, run `... kb route-escalate <run-id>` and dispatch one new worker at the
+and `escalate_once` is present, run `RUNNER kb route-escalate <run-id>` and dispatch one new worker at the
 returned next tier. Validate the new draft once. Never perform a second escalation and never replay side
 effects. A rejected Sol draft is a hard stop requiring clearer evidence or user input.
 

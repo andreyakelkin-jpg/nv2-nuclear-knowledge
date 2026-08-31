@@ -5,10 +5,11 @@ description: Create, update, and assess role-based nuclear-industry personnel tr
 
 # Train nuclear personnel
 
-Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Resolve the external
-knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
-PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
-`KB_ROOT` from the current project.
+Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Set `RUNNER` to
+`powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1` on Windows or
+`sh PLUGIN_ROOT/scripts/run.sh` on Linux. Run `RUNNER kb root` and use the returned absolute path as
+`KB_ROOT`; never infer it from the current project. For installation, transfer, or diagnostic failures,
+read [the platform setup guide](../../references/platform-setup.md) and run `RUNNER doctor`.
 
 Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Routine
 drafting may use Terra/medium; admission decisions, critical-error rules, and uncertain normative evidence
@@ -22,7 +23,6 @@ are high-criticality and route to Sol/high.
 6. Define critical errors separately from score. A critical safety error cannot be compensated by unrelated correct answers.
 7. Store generated artifacts only when the user asks to create or update a program or assessment.
 
-For deterministic scoring, run `powershell -NoProfile -ExecutionPolicy Bypass -File
-PLUGIN_ROOT/scripts/run.ps1 assess <assignment> <answers>`.
+For deterministic scoring, run `RUNNER assess <assignment> <answers>`.
 
 When a source changes, use the impact index to identify affected questions, personnel, and retraining dates.

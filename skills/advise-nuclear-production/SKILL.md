@@ -5,10 +5,11 @@ description: Provide role-based, evidence-backed advice for a nuclear-industry m
 
 # Advise nuclear production
 
-Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Resolve the external
-knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
-PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
-`KB_ROOT` from the current project.
+Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Set `RUNNER` to
+`powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1` on Windows or
+`sh PLUGIN_ROOT/scripts/run.sh` on Linux. Run `RUNNER kb root` and use the returned absolute path as
+`KB_ROOT`; never infer it from the current project. For installation, transfer, or diagnostic failures,
+read [the platform setup guide](../../references/platform-setup.md) and run `RUNNER doctor`.
 
 Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Safety,
 compliance, deviations, substitutions, conformity, release, and contractual commitments are

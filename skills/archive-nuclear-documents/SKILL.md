@@ -5,10 +5,11 @@ description: Archive PDF, DOCX, text PDF, and scanned normative documents into t
 
 # Archive nuclear documents
 
-Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Resolve the external
-knowledge base by running `powershell -NoProfile -ExecutionPolicy Bypass -File
-PLUGIN_ROOT/scripts/run.ps1 kb root` and use the returned absolute path as `KB_ROOT`. Never infer
-`KB_ROOT` from the current project.
+Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Set `RUNNER` to
+`powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1` on Windows or
+`sh PLUGIN_ROOT/scripts/run.sh` on Linux. Run `RUNNER kb root` and use the returned absolute path as
+`KB_ROOT`; never infer it from the current project. For installation, transfer, or diagnostic failures,
+read [the platform setup guide](../../references/platform-setup.md) and run `RUNNER doctor`.
 
 Before substantive work, follow [the shared routing protocol](../../references/model-routing.md). Treat
 archiving, replacement, OCR ambiguity, and reference resolution as high-criticality. Workers prepare drafts;
@@ -16,22 +17,21 @@ only the controlling agent may call `kb apply`, once, after validation succeeds.
 
 ## Workflow
 
-1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb stage
-   <source>` unless the attachment is already staged.
-2. Run `... run.ps1 kb archive-context <stage-id> --max-chars 16000`. This is the default source for
+1. Run `RUNNER kb stage <source>` unless the attachment is already staged.
+2. Run `RUNNER kb archive-context <stage-id> --max-chars 16000`. This is the default source for
    categories, duplicate candidates, corpus state, and resource paths. Do not read every file in
    `KB_ROOT/meta/`.
 3. Read the archivist prompt and card template named in that compact context. Inspect extraction quality.
    For scans, tables, footnotes, appendices, or suspicious OCR, compare rendered pages with extracted text.
 4. Extract every normative mention. Resolve them in bounded batches with repeated
-   `... run.ps1 kb archive-context <stage-id> --reference "<designation>" --max-chars 16000` calls and
+   `RUNNER kb archive-context <stage-id> --reference "<designation>" --max-chars 16000` calls and
    follow [references/reference-contract.md](references/reference-contract.md). Do not load the full
    cross-reference or addition-queue registry.
 5. Create the compact Markdown card, detailed `references.yaml`, and `decision.yaml` under
    `KB_ROOT/generated/<stage_id>/`. Put `references_file` in the decision; never put the full references
    array in the card.
-6. Run `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1 kb apply
-   <decision.yaml>`. This must synchronize prior references, rebuild indexes, prioritize the queue,
+6. Run `RUNNER kb apply <decision.yaml>`. This must synchronize prior references, rebuild indexes,
+   prioritize the queue,
    build replacements, and validate integrity atomically.
 7. Report the archived document, review state, resolved references, remaining high-priority gaps, and all items requiring expert analysis.
 

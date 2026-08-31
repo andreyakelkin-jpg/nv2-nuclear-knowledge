@@ -17,6 +17,7 @@ KB_SCRIPT = SCRIPTS / "kb.py"
 sys.path.insert(0, str(SCRIPTS))
 
 from model_router import assess_route, non_inferiority_gate, validate_answer_text  # noqa: E402
+from eval_routing import evaluate  # noqa: E402
 
 
 class DeterministicRoutingTests(unittest.TestCase):
@@ -89,6 +90,15 @@ class DeterministicRoutingTests(unittest.TestCase):
         degraded = [{"routed_score": 0.75, "sol_score": 1.0} for _ in range(15)]
         self.assertEqual("passed", non_inferiority_gate(equal, margin=0.05, minimum_cases=12)["status"])
         self.assertEqual("failed", non_inferiority_gate(degraded, margin=0.05, minimum_cases=12)["status"])
+
+    def test_representative_results_remain_non_inferior_to_sol_baseline(self) -> None:
+        dataset = yaml.safe_load((PLUGIN_ROOT / "evals/routing-cases.yaml").read_text(encoding="utf-8"))
+        routed = json.loads((PLUGIN_ROOT / "evals/results/routed-v1.json").read_text(encoding="utf-8"))
+        sol = json.loads((PLUGIN_ROOT / "evals/results/sol-baseline-v1.json").read_text(encoding="utf-8"))
+        comparison = evaluate(dataset, routed, sol)
+        gate = non_inferiority_gate(comparison["comparisons"], margin=0.05, minimum_cases=12)
+        self.assertEqual("passed", gate["status"])
+        self.assertGreaterEqual(gate["mean_difference"], 0.0)
 
 
 class RoutingCliTests(unittest.TestCase):
