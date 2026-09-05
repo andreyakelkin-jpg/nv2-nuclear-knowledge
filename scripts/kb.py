@@ -24,6 +24,10 @@ from document_security import (
     sha256_file,
     validate_security_report,
 )
+from document_usage import (
+    document_usage_statistics,
+    record_document_usage,
+)
 from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root, resolve_state_root
 from model_router import (
     apply_quality_gate,
@@ -684,7 +688,7 @@ def _command_apply_locked(args: argparse.Namespace) -> None:
 
 
 def command_apply(args: argparse.Namespace) -> None:
-    with exclusive_file_lock(ROOT / ".locks" / "apply.lock"):
+    with exclusive_file_lock(ROOT / ".locks" / "apply.lock", "kb apply"):
         _command_apply_locked(args)
 
 
@@ -712,6 +716,44 @@ def command_archive_context(args: argparse.Namespace) -> None:
         references=args.reference,
         max_chars=args.max_chars,
     ))
+
+
+def command_usage_record(args: argparse.Namespace) -> None:
+    payload = {
+        "schema_version": 1,
+        "answer_id": args.answer_id,
+        "used_documents": args.used,
+        "missing_documents": args.missing,
+    }
+    with exclusive_file_lock(
+        STATE_ROOT / ".locks" / "document-usage.lock", "учёт обращений к документам"
+    ):
+        print_json(record_document_usage(STATE_ROOT, ROOT, payload))
+
+
+def command_document_usage(args: argparse.Namespace) -> None:
+    statistics = document_usage_statistics(STATE_ROOT, ROOT)
+    limit = max(1, min(100, args.limit))
+    print_json({
+        "generated_at": statistics["generated_at"],
+        "counting_rule": statistics["counting_rule"],
+        "tracked_document_count": statistics["document_count"],
+        "results": statistics["documents"][:limit],
+        "table_path": statistics["table_path"],
+    })
+
+
+def command_demand_priorities(args: argparse.Namespace) -> None:
+    statistics = document_usage_statistics(STATE_ROOT, ROOT)
+    limit = max(1, min(100, args.limit))
+    print_json({
+        "generated_at": statistics["generated_at"],
+        "counting_rule": statistics["counting_rule"],
+        "ranking_basis": statistics["ranking_basis"],
+        "active_demand_count": statistics["active_demand_count"],
+        "results": statistics["demand"][:limit],
+        "table_path": statistics["table_path"],
+    })
 
 
 def command_route(args: argparse.Namespace) -> None:
@@ -770,10 +812,15 @@ def command_status(_: argparse.Namespace) -> None:
     report = read_yaml(ROOT / "reports" / "integrity-latest.yaml")
     queue = read_yaml(META / "addition-queue.yaml").get("queue", [])
     priorities = {name: sum(1 for item in queue if item.get("priority") == name) for name in ("high", "medium", "low")}
+    usage = document_usage_statistics(STATE_ROOT, ROOT)
     print("БАЗА ЗНАНИЙ")
     print(f"Документов: {manifest.get('document_count', 0)} | ссылок: {manifest.get('reference_count', 0)}")
     print(f"Ожидают AI-анализа: {len(pending)}" + (f" ({', '.join(pending)})" if pending else ""))
     print(f"Очередь: {len(queue)} (высокий {priorities['high']}, средний {priorities['medium']}, низкий {priorities['low']})")
+    print(
+        f"Документов в счётчике: {usage['document_count']} | "
+        f"нужно загрузить: {usage['active_demand_count']}"
+    )
     print("Последняя проверка: " + ("пройдена" if report.get("valid") else "есть ошибки/ещё не запускалась"))
 
 
@@ -836,6 +883,23 @@ def main() -> None:
     context.add_argument("--max-chars", type=int, default=16000, help="Предельный размер JSON (2000–50000)")
     context.add_argument("--format", choices=("json",), default="json")
     context.set_defaults(func=command_archive_context)
+    usage_record = commands.add_parser(
+        "usage-record", help="Учесть использованные и недостающие документы одного итогового ответа"
+    )
+    usage_record.add_argument("--answer-id", required=True, help="Уникальный ID итогового ответа")
+    usage_record.add_argument("--used", action="append", default=[], help="Использованный документ; можно повторять")
+    usage_record.add_argument("--missing", action="append", default=[], help="Недостающий документ; можно повторять")
+    usage_record.set_defaults(func=command_usage_record)
+    usage = commands.add_parser(
+        "document-usage", help="Показать самые востребованные документы по итоговым ответам"
+    )
+    usage.add_argument("--limit", type=int, default=20, help="Число документов (1–100)")
+    usage.set_defaults(func=command_document_usage)
+    demand = commands.add_parser(
+        "demand-priorities", help="Показать документы к загрузке по числу ответов, которым их не хватило"
+    )
+    demand.add_argument("--limit", type=int, default=20, help="Число документов (1–100)")
+    demand.set_defaults(func=command_demand_priorities)
     route = commands.add_parser("route", help="Детерминированно выбрать worker-модель и открыть журналируемый run")
     route.add_argument("--task-id", required=True, help="Нечувствительный идентификатор задачи; в журнал попадёт только SHA-256")
     route.add_argument("--complexity", required=True, choices=("low", "medium", "high"))

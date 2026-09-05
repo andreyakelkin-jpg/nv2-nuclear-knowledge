@@ -41,6 +41,9 @@ only the controlling agent may call `kb apply`, once, after validation succeeds.
    build replacements, and validate integrity atomically.
 8. Report the archived document, security verdict, review state, resolved references, remaining
    high-priority gaps, and all items requiring expert analysis.
+9. Before the final response, follow [the document usage protocol](../../references/document-usage.md).
+   Count the document handled by this request once. Add missing documents only when their absence actually
+   limited the user-facing result; do not duplicate the full structural cross-reference queue.
 
 ## Guardrails
 

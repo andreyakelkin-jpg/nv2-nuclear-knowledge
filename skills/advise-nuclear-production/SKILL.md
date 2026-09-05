@@ -20,5 +20,8 @@ high-criticality and route to Sol/high.
 3. Apply the relevant role lens from [references/roles.md](references/roles.md). Read the matching detailed prompt in `KB_ROOT/prompts/advisors/` when present.
 4. Separate mandatory requirements, engineering interpretation, commercial assumption, and recommendation.
 5. Return a decision memo: recommendation, alternatives, normative basis, impacts on safety/quality/cost/schedule, risk owner, evidence required, and approval gate.
+6. Before the final response, follow [the document usage protocol](../../references/document-usage.md).
+   Record once under this outer skill, including evidence documents returned by the nested query and only
+   the specific unavailable documents that would have improved this decision memo.
 
 Do not approve deviations, material substitutions, conformity, product release, or contractual promises without explicit authority and evidence. If no card is approved for operational use, label the memo preliminary.

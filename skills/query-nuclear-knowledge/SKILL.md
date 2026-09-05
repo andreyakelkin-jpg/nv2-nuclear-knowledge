@@ -1,6 +1,6 @@
 ---
 name: query-nuclear-knowledge
-description: Search and answer questions from the local nuclear-industry normative knowledge base with traceable evidence. Use for applicability checks, requirements lookup, cross-document comparison, material or process questions, missing-document analysis, and context packages for other projects.
+description: Search and answer questions from the local nuclear-industry normative knowledge base with traceable evidence. Use for applicability checks, requirements lookup, cross-document comparison, material or process questions, missing-document analysis, demand and usage statistics, and context packages for other projects.
 ---
 
 # Query nuclear knowledge
@@ -41,6 +41,10 @@ comparison.
 5. Answer using [references/evidence-contract.md](references/evidence-contract.md).
 6. Mark conclusions from non-approved cards as preliminary. If evidence is incomplete, list the missing
    document, clause, or project parameter instead of guessing.
+7. For a direct substantive answer, follow [the document usage protocol](../../references/document-usage.md)
+   and record the documents actually used plus specific documents that would have improved the answer.
+   When this skill is only supplying evidence to another NV2 skill, pass both lists upward and let the
+   outermost skill record once.
 
 ## Retrieval order
 

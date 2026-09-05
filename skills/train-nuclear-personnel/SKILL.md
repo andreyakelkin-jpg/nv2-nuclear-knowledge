@@ -22,6 +22,9 @@ are high-criticality and route to Sol/high.
 5. Include knowledge questions, document-navigation tasks, and realistic cases.
 6. Define critical errors separately from score. A critical safety error cannot be compensated by unrelated correct answers.
 7. Store generated artifacts only when the user asks to create or update a program or assessment.
+8. Before the final response, follow [the document usage protocol](../../references/document-usage.md).
+   Record once under this outer skill, including the documents actually used to build or assess the
+   training and any specific unavailable sources that limited it.
 
 For deterministic scoring, run `RUNNER assess <assignment> <answers>`.
 

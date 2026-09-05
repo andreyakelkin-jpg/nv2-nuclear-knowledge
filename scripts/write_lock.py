@@ -33,7 +33,7 @@ def _unlock(stream: BinaryIO) -> None:
 
 
 @contextmanager
-def exclusive_file_lock(path: Path) -> Iterator[None]:
+def exclusive_file_lock(path: Path, operation: str = "операцию записи") -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
         if stream.seek(0, os.SEEK_END) == 0:
@@ -42,7 +42,9 @@ def exclusive_file_lock(path: Path) -> Iterator[None]:
         try:
             _lock(stream)
         except OSError as error:
-            raise RuntimeError("Другой writer уже выполняет kb apply; повторите после его завершения") from error
+            raise RuntimeError(
+                f"Другой writer уже выполняет {operation}; повторите после его завершения"
+            ) from error
         try:
             yield
         finally:
