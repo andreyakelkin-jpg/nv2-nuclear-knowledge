@@ -14,6 +14,8 @@ import yaml
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 KB_SCRIPT = PLUGIN_ROOT / "scripts" / "kb.py"
+sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+from document_usage import refresh_document_usage  # noqa: E402
 
 
 class DocumentUsageCliTests(unittest.TestCase):
@@ -198,6 +200,112 @@ class DocumentUsageCliTests(unittest.TestCase):
         self.assertEqual(1, len(matching))
         self.assertEqual(1, matching[0]["potential_count"])
         self.assertEqual(1, matching[0]["used_count"])
+
+    def test_nonconsecutive_technical_retry_is_counted_once(self) -> None:
+        self.record("answer-a", missing=["ГОСТ 9.999-2024"])
+        self.record("answer-b", missing=["ГОСТ 9.999-2024"])
+        retried = self.record("answer-a", missing=["ГОСТ 9.999-2024"])
+        self.assertEqual(0, retried["counter_increments"])
+        demand = self.run_cli("demand-priorities", "--limit", "10")
+        self.assertEqual(2, demand["results"][0]["potential_count"])
+        with (self.state / "meta/document-usage.csv").open(encoding="utf-8-sig") as stream:
+            row = next(csv.DictReader(stream, delimiter=";"))
+        self.assertIn("answer-a", row["potential_answer_ids"])
+        self.assertIn("answer-b", row["potential_answer_ids"])
+
+    def test_removed_and_reuploaded_document_refreshes_status_without_increment(self) -> None:
+        self.record("answer-a", used=["НП-001-15"])
+        documents_path = self.root / "meta/documents.yaml"
+        self._write_yaml(documents_path, {"documents": []})
+        refreshed = refresh_document_usage(self.state, self.root)
+        self.assertEqual(1, refreshed["tracked_document_count"])
+        usage = self.run_cli("document-usage", "--limit", "10")
+        self.assertEqual("observed", usage["results"][0]["status"])
+        self.assertEqual(1, usage["results"][0]["used_count"])
+        self.setUp_document_np001(documents_path)
+        refresh_document_usage(self.state, self.root)
+        usage = self.run_cli("document-usage", "--limit", "10")
+        self.assertEqual("loaded", usage["results"][0]["status"])
+        self.assertEqual(1, usage["results"][0]["used_count"])
+
+    def setUp_document_np001(self, path: Path) -> None:
+        self._write_yaml(
+            path,
+            {"documents": [{
+                "id": "np-001-15", "short_title": "НП-001-15",
+                "canonical_exact": "np:001-15", "canonical_family": "np:001-15",
+            }]},
+        )
+
+    def test_machine_id_alias_and_cyrillic_label_share_exact_loaded_record(self) -> None:
+        self.record("answer-a", used=["НП-001-15"])
+        self.record("answer-b", used=["np-001-15"])
+        usage = self.run_cli("document-usage", "--limit", "10")
+        self.assertEqual(1, len(usage["results"]))
+        self.assertEqual(2, usage["results"][0]["used_count"])
+
+    def test_explicit_editions_are_never_collapsed_by_family(self) -> None:
+        documents = yaml.safe_load((self.root / "meta/documents.yaml").read_text(encoding="utf-8"))
+        documents["documents"].extend([
+            {"id": "gost-1.111-2024", "short_title": "ГОСТ 1.111-2024", "canonical_exact": "gost:1.111:2024", "canonical_family": "gost:1.111"},
+            {"id": "gost-1.111-2025", "short_title": "ГОСТ 1.111-2025", "canonical_exact": "gost:1.111:2025", "canonical_family": "gost:1.111"},
+        ])
+        self._write_yaml(self.root / "meta/documents.yaml", documents)
+        self.record("answer-a", used=["ГОСТ 1.111-2024"])
+        self.record("answer-b", used=["ГОСТ 1.111-2025"])
+        usage = self.run_cli("document-usage", "--limit", "10")
+        matching = [item for item in usage["results"] if item["document"].startswith("ГОСТ 1.111")]
+        self.assertEqual(2, len(matching))
+        self.assertEqual({1}, {item["used_count"] for item in matching})
+
+    def test_legacy_counts_are_preserved_when_refresh_migrates_table(self) -> None:
+        table = self.state / "meta/document-usage.csv"
+        table.parent.mkdir(parents=True, exist_ok=True)
+        table.write_text(
+            "canonical_key;family_key;document;used_count;potential_count;last_used_answer_id\n"
+            "np:001-15;np:001-15;НП-001-15;7;3;legacy-last\n",
+            encoding="utf-8-sig",
+        )
+        refresh_document_usage(self.state, self.root)
+        usage = self.run_cli("document-usage", "--limit", "10")
+        self.assertEqual(7, usage["results"][0]["used_count"])
+        self.assertEqual(3, usage["results"][0]["potential_count"])
+        with table.open(encoding="utf-8-sig", newline="") as stream:
+            row = next(csv.DictReader(stream, delimiter=";"))
+        self.assertIn("used_answer_ids", row)
+        self.assertIn("legacy-last", row["used_answer_ids"])
+
+    def test_malformed_counter_table_is_rejected_without_replacement(self) -> None:
+        table = self.state / "meta/document-usage.csv"
+        table.parent.mkdir(parents=True, exist_ok=True)
+        original = (
+            "canonical_key;document;used_count;potential_count\n"
+            "np:001-15;НП-001-15;-1;0\n"
+        )
+        table.write_text(original, encoding="utf-8-sig")
+        with self.assertRaisesRegex(ValueError, "отрицательный"):
+            refresh_document_usage(self.state, self.root)
+        self.assertEqual(original, table.read_text(encoding="utf-8-sig"))
+
+    def test_alias_migration_unions_answer_ids_instead_of_doubling_retry(self) -> None:
+        documents = yaml.safe_load((self.root / "meta/documents.yaml").read_text(encoding="utf-8"))
+        documents["documents"].append(
+            {"id": "gost-1.111-2024", "short_title": "ГОСТ 1.111-2024", "canonical_exact": "gost:1.111:2024", "canonical_family": "gost:1.111"}
+        )
+        self._write_yaml(self.root / "meta/documents.yaml", documents)
+        table = self.state / "meta/document-usage.csv"
+        table.parent.mkdir(parents=True, exist_ok=True)
+        table.write_text(
+            "canonical_key;family_key;document;used_count;potential_count;potential_answer_ids\n"
+            "gost:1.111;gost:1.111;ГОСТ 1.111;0;1;[\"answer-a\"]\n"
+            "gost:1.111:2024;gost:1.111;ГОСТ 1.111-2024;0;1;[\"answer-a\"]\n",
+            encoding="utf-8-sig",
+        )
+        refresh_document_usage(self.state, self.root)
+        usage = self.run_cli("document-usage", "--limit", "10")
+        matching = [item for item in usage["results"] if item["document"].startswith("ГОСТ 1.111")]
+        self.assertEqual(1, len(matching))
+        self.assertEqual(1, matching[0]["potential_count"])
 
 
 if __name__ == "__main__":

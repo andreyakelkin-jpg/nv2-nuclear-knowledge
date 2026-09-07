@@ -28,6 +28,10 @@ only the controlling agent may call `kb apply`, once, after validation succeeds.
    `KB_ROOT/meta/`.
 4. Read the archivist prompt and card template named in that compact context. Inspect extraction quality.
    For scans, tables, footnotes, appendices, or suspicious OCR, compare rendered pages with extracted text.
+   Check `extraction_quality` page by page: a long file can still contain empty scanned pages. DOCX table
+   order is preserved; PDF extraction fallback is not OCR. For existing faulty derived text, preview
+   `kb repair-extraction <exact-id> --dry-run`; replace only after comparing the original and proposed text.
+   The repair backs up card/text and resets expert-review status; it never changes the original.
 5. Extract every normative mention. Resolve them in bounded batches with repeated
    `RUNNER kb archive-context <stage-id> --reference "<designation>" --max-chars 16000` calls and
    follow [references/reference-contract.md](references/reference-contract.md). Do not load the full
@@ -39,6 +43,8 @@ only the controlling agent may call `kb apply`, once, after validation succeeds.
    single-writer lock, synchronize prior references, rebuild indexes,
    prioritize the queue,
    build replacements, and validate integrity atomically.
+   All corpus-writing commands share one lock. Index generations publish through one atomic pointer;
+   unchanged normalized sources reuse structural indexes. Do not hand-edit generated index files.
 8. Report the archived document, security verdict, review state, resolved references, remaining
    high-priority gaps, and all items requiring expert analysis.
 9. Before the final response, follow [the document usage protocol](../../references/document-usage.md).

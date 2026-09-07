@@ -29,6 +29,10 @@ comparison.
 
 ## Workflow
 
+For usage/demand/status/quality questions, use the corresponding bounded administrative command directly,
+without routing or recording a new document observation. When supplying evidence to another skill,
+reuse its run and return evidence only. Resolve the root once and reuse it within this task.
+
 1. Run `RUNNER kb search "<query>" --limit 6 --max-chars 12000` to identify candidates. Do not open
    `meta/documents.yaml`, `meta/cross-references.yaml`, or another full registry for discovery.
 2. Check status, lifecycle, replacements, and applicability in the compact search result. Fetch evidence
@@ -36,6 +40,10 @@ comparison.
    `--pages <page-list>` or `--query "<phrase>" --context-lines 2` when clause numbers are unknown.
 3. Read a full Markdown card only when a field absent from search/fetch is required. Never load an entire
    normalized document when bounded `kb fetch` can provide the evidence.
+   For several documents use `kb fetch-batch <requests.yaml> --max-chars 16000`; YAML contains a `requests`
+   list of up to eight `{document: id, clauses: ['1.2'], pages: [3], query: phrase}` objects. Include only
+   needed selectors. An exact missing edition must not be replaced by a family match. For ambiguous
+   clause numbers use the returned `number@line:N` anchor; unknown page mapping is not page 1.
 4. Compare the original PDF only when exact visual structure, a table, formula, scan, footnote, or OCR
    ambiguity matters.
 5. Answer using [references/evidence-contract.md](references/evidence-contract.md).
@@ -45,6 +53,8 @@ comparison.
    and record the documents actually used plus specific documents that would have improved the answer.
    When this skill is only supplying evidence to another NV2 skill, pass both lists upward and let the
    outermost skill record once.
+   Prefer one `kb finish` call for validation and counting. A short factual answer needs a direct answer,
+   source locator and material caveat, not six mandatory sections. Reserve the full memo for decisions.
 
 ## Retrieval order
 

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,7 +29,11 @@ from document_security import (
 from document_usage import (
     document_usage_statistics,
     record_document_usage,
+    refresh_document_usage,
 )
+from index_store import atomic_write, index_path, pin_indexes, publish_indexes
+from evidence_validation import validate_evidence
+from extraction_quality import extract_text, extraction_quality
 from kb_root import CONFIG_PATH, SUPPORTED_SCHEMA_VERSION, resolve_kb_root, resolve_state_root
 from model_router import (
     apply_quality_gate,
@@ -37,6 +43,7 @@ from model_router import (
     routing_status,
     set_routing_enabled,
     start_route,
+    evaluation_identity,
 )
 from reference_resolver import (
     canonical_identifier,
@@ -77,13 +84,12 @@ def now() -> str:
 def read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     return loaded or {}
 
 
 def write_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100), encoding="utf-8")
+    atomic_write(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100).encode("utf-8"))
 
 
 def relative(path: Path) -> str:
@@ -101,7 +107,7 @@ def front_matter(path: Path) -> tuple[dict[str, Any], str]:
     end = text.find("\n---\n", 4)
     if end < 0:
         raise ValueError("не закрыт YAML-фронтматтер")
-    metadata = yaml.safe_load(text[4:end]) or {}
+    metadata = yaml.load(text[4:end], Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)) or {}
     if not isinstance(metadata, dict):
         raise ValueError("YAML-фронтматтер должен быть объектом")
     return metadata, text[end + 5:]
@@ -140,37 +146,6 @@ def type_directory(document_type: str) -> str:
         return aliases[normalized]
     slug = re.sub(r"[^a-z0-9-]+", "-", document_type.lower()).strip("-")
     return slug or "other"
-
-
-def extract_text(source: Path) -> tuple[str, str]:
-    suffix = source.suffix.lower()
-    if suffix in {".txt", ".md"}:
-        return source.read_text(encoding="utf-8", errors="replace"), "plain-text"
-    if suffix == ".docx":
-        from docx import Document
-
-        document = Document(source)
-        parts = [item.text for item in document.paragraphs if item.text.strip()]
-        for number, table in enumerate(document.tables, 1):
-            parts.append(f"\n[ТАБЛИЦА {number}]")
-            parts.extend(" | ".join(cell.text.strip() for cell in row.cells) for row in table.rows)
-        return "\n".join(parts), "python-docx"
-    if suffix == ".pdf":
-        try:
-            from pypdf import PdfReader
-            pages = PdfReader(str(source)).pages
-            return "".join(
-                f"\n\n===== СТРАНИЦА {number} =====\n{page.extract_text() or ''}"
-                for number, page in enumerate(pages, 1)
-            ), "pypdf"
-        except Exception:
-            import pdfplumber
-            with pdfplumber.open(source) as pdf:
-                return "".join(
-                    f"\n\n===== СТРАНИЦА {number} =====\n{page.extract_text() or ''}"
-                    for number, page in enumerate(pdf.pages, 1)
-                ), "pdfplumber"
-    raise ValueError("Допустимы только PDF, DOCX, TXT и MD")
 
 
 def existing_hashes() -> set[str]:
@@ -216,6 +191,7 @@ def stage_document(source: Path, security_report: Path | None = None) -> str:
     shutil.copy2(source, staged_source)
     shutil.copy2(report_path, staged_security_report)
     text, method = extract_text(staged_source)
+    quality = extraction_quality(text, method)
     (stage_dir / "extracted.txt").write_text(text, encoding="utf-8")
     write_yaml(stage_dir / "manifest.yaml", {
         "stage_id": stage_id,
@@ -231,8 +207,9 @@ def stage_document(source: Path, security_report: Path | None = None) -> str:
         "security_report": relative(staged_security_report),
         "security_report_sha256": sha256_file(staged_security_report),
         "characters_extracted": len(text),
-        "requires_visual_review": len(text.strip()) < 500,
-        "warning": "Мало извлечённого текста: требуется OCR и визуальная проверка." if len(text.strip()) < 500 else None,
+        "requires_visual_review": quality["requires_visual_review"],
+        "extraction_quality": quality,
+        "warning": "Проверьте извлечение по страницам; при необходимости выполните OCR." if quality["requires_visual_review"] else None,
     })
     return stage_id
 
@@ -297,7 +274,7 @@ def build_indexes() -> dict[str, int]:
     impacts: dict[str, dict[str, Any]] = {}
     previous_queue = {
         queue_key({"cited_as": str(item.get("document_label", ""))}): item
-        for item in read_yaml(META / "addition-queue.yaml").get("queue", [])
+        for item in read_yaml(index_path(ROOT, "meta/addition-queue.yaml")).get("queue", [])
     }
     generated_queue: dict[str, dict[str, Any]] = {}
     generated_replacements: dict[str, dict[str, Any]] = {}
@@ -320,6 +297,9 @@ def build_indexes() -> dict[str, int]:
             "categories": metadata.get("category", []), "source_available": bool(source.get("original_file")),
             "applies_to": metadata.get("applies_to", []),
             "normalized_path": source.get("normalized_file"),
+            "original_path": source.get("original_file"),
+            "source_pages": source.get("pages"),
+            "extraction_confidence": source.get("extraction_confidence"),
             "source_sha256": source.get("sha256"),
             "verification": {
                 "legal_status": verification.get("legal_status"),
@@ -410,24 +390,27 @@ def build_indexes() -> dict[str, int]:
         entry["basis"] = sorted(entry["basis"])
         entry["cited_by"] = sorted(entry["cited_by"])
         replacements_output.append(entry)
-    write_yaml(META / "documents.yaml", {"documents": documents})
-    write_yaml(META / "cross-references.yaml", {"references": references})
-    write_yaml(META / "materials.yaml", {"materials": sorted(materials.values(), key=lambda value: value["name"])})
-    write_yaml(META / "addition-queue.yaml", {"queue": queue_output})
-    write_yaml(META / "replacements.yaml", {"replacements": replacements_output})
-    write_yaml(META / "impact-index.yaml", {"impacts": sorted(impacts.values(), key=lambda value: value["document_id"])})
-    retrieval_summary = build_retrieval_indexes(ROOT, documents, indexed_at)
-    write_yaml(META / "corpus-manifest.yaml", {
-        "schema_version": 2, "last_indexed_at": indexed_at, "document_count": len(documents),
-        "reference_count": len(references),
-        "reference_storage_schema": 1,
-        "retrieval_index": retrieval_summary,
-        "context_policy": "В LLM передаются карточки, реестры и релевантные фрагменты, а не весь корпус.",
-    })
-    return {
-        "documents": len(documents), "references": len(references), "queue": len(queue_output),
-        "clauses": retrieval_summary["clauses"], "pages": retrieval_summary["pages"],
-    }
+    errors, _ = validate_base()
+    if errors:
+        raise ValueError("; ".join(errors))
+    def build_generation(output_meta: Path) -> dict:
+        from training_impact import training_impact
+        write_yaml(output_meta / "documents.yaml", {"documents": documents})
+        write_yaml(output_meta / "cross-references.yaml", {"references": references})
+        write_yaml(output_meta / "materials.yaml", {"materials": sorted(materials.values(), key=lambda value: value["name"])})
+        write_yaml(output_meta / "addition-queue.yaml", {"queue": queue_output})
+        write_yaml(output_meta / "replacements.yaml", {"replacements": replacements_output})
+        write_yaml(output_meta / "impact-index.yaml", {"impacts": sorted(impacts.values(), key=lambda value: value["document_id"])})
+        write_yaml(output_meta / "training-impact.yaml", training_impact(ROOT, documents))
+        retrieval_summary = build_retrieval_indexes(ROOT, documents, indexed_at, output_meta=output_meta)
+        write_yaml(output_meta / "corpus-manifest.yaml", {
+            "schema_version": 2, "last_indexed_at": indexed_at, "document_count": len(documents),
+            "reference_count": len(references), "reference_storage_schema": 1,
+            "retrieval_index": retrieval_summary,
+            "context_policy": "В LLM передаются карточки, реестры и релевантные фрагменты, а не весь корпус.",
+        })
+        return {"documents": len(documents), "references": len(references), "queue": len(queue_output), **retrieval_summary}
+    return publish_indexes(ROOT, build_generation)
 
 
 def validate_base() -> tuple[list[str], list[str]]:
@@ -502,19 +485,13 @@ def write_validation_report(errors: list[str], warnings: list[str]) -> None:
 
 
 def command_rebuild_index(_: argparse.Namespace) -> None:
-    sync = synchronize_references(ROOT)
-    summary = build_indexes()
-    print(f"Синхронизировано ссылок: {sync['resolved_references']}; изменено карточек: {sync['changed_documents']}")
-    print(
-        f"Индексы обновлены: документов {summary['documents']}, ссылок {summary['references']}, "
-        f"пунктов {summary['clauses']}, страниц {summary['pages']}, очередь {summary['queue']}"
-    )
+    command_sync(_)
 
 
 def command_sync(_: argparse.Namespace) -> None:
     tracked = [
         *document_files(), *reference_files(), *expected_reference_files(),
-        *META.glob("*.yaml"), *META.glob("*.json"),
+        *META.glob("*.yaml"), *META.glob("*.json"), META / "index-current.json",
     ]
     before = snapshot(tracked)
     try:
@@ -543,10 +520,53 @@ def command_validate(_: argparse.Namespace) -> None:
     print("Проверка пройдена.")
 
 
+def command_repair_extraction(args: argparse.Namespace) -> None:
+    document = next((item for item in read_yaml(index_path(ROOT)).get("documents", []) if item["id"] == args.document), None)
+    if not document:
+        raise ValueError("Укажите точный ID существующего документа")
+    card = (ROOT / document["path"]).resolve()
+    metadata, body = front_matter(card)
+    source = metadata.get("source", {})
+    original = (ROOT / str(source.get("original_file", ""))).resolve()
+    normalized_path = (ROOT / str(source.get("normalized_file", ""))).resolve()
+    for path in (card, original, normalized_path):
+        if ROOT.resolve() not in path.parents or not path.is_file():
+            raise ValueError("Исходник, текст и карточка должны находиться внутри базы")
+    if sha256_file(original) != source.get("sha256"):
+        raise ValueError("SHA-256 оригинала изменился; используйте проверенную процедуру загрузки")
+    text, method = extract_text(original)
+    quality = extraction_quality(text, method)
+    old_text = normalized_path.read_text(encoding="utf-8")
+    report = {"document_id": args.document, "method": method, "old_characters": len(old_text),
+              "new_characters": len(text), "quality": quality, "dry_run": args.dry_run}
+    if args.dry_run:
+        print_json(report)
+        return
+    if len(text.strip()) < max(100, len(old_text.strip()) * .8):
+        raise ValueError("Повторное извлечение теряет слишком много текста; автоматическая замена запрещена")
+    before = snapshot([card, normalized_path, *META.glob("*.yaml"), *META.glob("*.json"), META / "index-current.json"])
+    backup = ROOT / "reports" / "extraction-backups" / f"{args.document}-{datetime.now():%Y%m%d-%H%M%S-%f}"
+    backup.mkdir(parents=True)
+    shutil.copy2(card, backup / "card.md")
+    shutil.copy2(normalized_path, backup / "normalized.txt")
+    try:
+        atomic_write(normalized_path, text.encode("utf-8"))
+        source.update(extraction_method=method, pages=quality["pages_detected"], extraction_quality=quality,
+                      extraction_confidence="requires_visual_review")
+        metadata.setdefault("lifecycle", {})["stage"] = "requires_expert_review"
+        atomic_write(card, markdown_with_front_matter(metadata, body).encode("utf-8"))
+        report["indexes"] = build_indexes()
+    except Exception:
+        restore(before)
+        raise
+    report["backup"] = str(backup)
+    print_json(report)
+
+
 def command_migrate_references(args: argparse.Namespace) -> None:
     tracked = [
         *document_files(), *reference_files(), *expected_reference_files(),
-        *META.glob("*.yaml"), *META.glob("*.json"),
+        *META.glob("*.yaml"), *META.glob("*.json"), META / "index-current.json",
     ]
     if args.dry_run:
         summary = externalize_all(ROOT, write=False)
@@ -643,7 +663,7 @@ def _command_apply_locked(args: argparse.Namespace) -> None:
     tracked = [
         destination_md, raw_path, normalized_path, destination_references,
         *document_files(), *reference_files(), *expected_reference_files(), META / "impact-index.yaml",
-        *META.glob("*.yaml"), *META.glob("*.json"), META / "clause-index.json", META / "search-index.json",
+        *META.glob("*.yaml"), *META.glob("*.json"), META / "clause-index.json", META / "search-index.json", META / "index-current.json",
     ]
     before = snapshot(tracked)
     try:
@@ -688,16 +708,18 @@ def _command_apply_locked(args: argparse.Namespace) -> None:
 
 
 def command_apply(args: argparse.Namespace) -> None:
-    with exclusive_file_lock(ROOT / ".locks" / "apply.lock", "kb apply"):
-        _command_apply_locked(args)
+    _command_apply_locked(args)
 
 
 def command_search(args: argparse.Namespace) -> None:
-    print_json(search_documents(ROOT, args.query, limit=args.limit, max_chars=args.max_chars))
+    started = time.perf_counter()
+    result = search_documents(ROOT, args.query, limit=args.limit, max_chars=args.max_chars)
+    print_json({**result, "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)})
 
 
 def command_fetch(args: argparse.Namespace) -> None:
-    print_json(fetch_document(
+    started = time.perf_counter()
+    result = fetch_document(
         ROOT,
         args.document,
         clause_values=args.clauses,
@@ -705,7 +727,8 @@ def command_fetch(args: argparse.Namespace) -> None:
         query=args.query,
         context_lines=args.context_lines,
         max_chars=args.max_chars,
-    ))
+    )
+    print_json({**result, "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)})
 
 
 def command_archive_context(args: argparse.Namespace) -> None:
@@ -716,6 +739,63 @@ def command_archive_context(args: argparse.Namespace) -> None:
         references=args.reference,
         max_chars=args.max_chars,
     ))
+
+
+def command_fetch_batch(args: argparse.Namespace) -> None:
+    requests = read_yaml(Path(args.requests)).get("requests")
+    if not isinstance(requests, list) or not 1 <= len(requests) <= 8:
+        raise ValueError("requests: от 1 до 8 запросов")
+    remaining = max(500, min(args.max_chars, 50000))
+    started = time.perf_counter()
+    results = []
+    for request in requests:
+        if not isinstance(request, dict) or not request.get("document"):
+            raise ValueError("Каждый запрос должен содержать document")
+        selectors = {}
+        for key in ("clauses", "pages"):
+            value = request.get(key, [])
+            if isinstance(value, (str, int)):
+                value = [str(value)]
+            if not isinstance(value, list):
+                raise ValueError(f"{key}: ожидается список")
+            selectors[key] = [str(item) for item in value]
+        if remaining < 500:
+            results.append({"document": request["document"], "complete": False, "error": "batch_budget_exhausted", "excerpts": []})
+            continue
+        result = fetch_document(ROOT, str(request["document"]), selectors["clauses"], selectors["pages"], request.get("query"), max_chars=remaining)
+        remaining -= sum(len(item["text"]) for item in result.get("excerpts", []))
+        results.append(result)
+    print_json({"results": results, "complete": all(item.get("complete") for item in results),
+                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)})
+
+
+def command_finish(args: argparse.Namespace) -> None:
+    from answer_service import finish_answer
+    print_json(finish_answer(ROOT, args.run_id, answer_path=Path(args.answer).resolve(), contract_path=Path(args.contract).resolve(),
+                             used=args.used, missing=args.missing,
+                             input_path=Path(args.input).resolve() if args.input else None,
+                             input_tokens=args.input_tokens, output_tokens=args.output_tokens,
+                             latency_ms=args.latency_ms, actual_model=args.actual_model,
+                             generation_ms=args.generation_ms, retrieval_ms=args.retrieval_ms))
+
+
+def command_evidence_check(args: argparse.Namespace) -> None:
+    print_json(validate_evidence(ROOT, Path(args.answer).read_text(encoding="utf-8"), read_yaml(Path(args.contract))))
+
+
+def command_review_priorities(args: argparse.Namespace) -> None:
+    from quality_reporting import review_priorities
+    print_json(review_priorities(ROOT, args.limit))
+
+
+def command_quality_status(_: argparse.Namespace) -> None:
+    from quality_reporting import quality_status
+    print_json(quality_status(ROOT))
+
+
+def command_training_impact(_: argparse.Namespace) -> None:
+    from training_impact import training_impact
+    print_json(training_impact(ROOT, read_yaml(index_path(ROOT)).get("documents", [])))
 
 
 def command_usage_record(args: argparse.Namespace) -> None:
@@ -780,6 +860,9 @@ def command_route_check(args: argparse.Namespace) -> None:
         input_tokens=args.input_tokens,
         output_tokens=args.output_tokens,
         latency_ms=args.latency_ms,
+        actual_model=args.actual_model,
+        generation_ms=args.generation_ms,
+        retrieval_ms=args.retrieval_ms,
     ))
 
 
@@ -804,13 +887,13 @@ def command_routing_gate(args: argparse.Namespace) -> None:
 
 
 def command_status(_: argparse.Namespace) -> None:
-    manifest = read_yaml(META / "corpus-manifest.yaml")
+    manifest = read_yaml(index_path(ROOT, "meta/corpus-manifest.yaml"))
     pending = [
         path.parent.name for path in (ROOT / "staging").glob("*/manifest.yaml")
         if read_yaml(path).get("state", "waiting_for_ai_analysis") == "waiting_for_ai_analysis"
     ]
     report = read_yaml(ROOT / "reports" / "integrity-latest.yaml")
-    queue = read_yaml(META / "addition-queue.yaml").get("queue", [])
+    queue = read_yaml(index_path(ROOT, "meta/addition-queue.yaml")).get("queue", [])
     priorities = {name: sum(1 for item in queue if item.get("priority") == name) for name in ("high", "medium", "low")}
     usage = document_usage_statistics(STATE_ROOT, ROOT)
     print("БАЗА ЗНАНИЙ")
@@ -829,7 +912,7 @@ def command_root(_: argparse.Namespace) -> None:
 
 
 def command_doctor(_: argparse.Namespace) -> None:
-    manifest = read_yaml(META / "corpus-manifest.yaml")
+    manifest = read_yaml(index_path(ROOT, "meta/corpus-manifest.yaml"))
     print("ПЛАГИН НВ2 — НОРМАТИВНАЯ БАЗА")
     print(f"Конфигурация: {CONFIG_PATH}")
     print(f"Корень базы: {ROOT}")
@@ -858,6 +941,10 @@ def main() -> None:
     apply.set_defaults(func=command_apply)
     rebuild = commands.add_parser("rebuild-index", help="Пересобрать производные реестры")
     rebuild.set_defaults(func=command_rebuild_index)
+    repair = commands.add_parser("repair-extraction", help="Повторно извлечь текст из неизменного оригинала с резервной копией")
+    repair.add_argument("document", help="Точный ID документа")
+    repair.add_argument("--dry-run", action="store_true")
+    repair.set_defaults(func=command_repair_extraction)
     migrate = commands.add_parser("migrate-references", help="Вынести подробные ссылки из карточек в отдельные файлы")
     migrate.add_argument("--dry-run", action="store_true", help="Показать объём миграции без изменений")
     migrate.set_defaults(func=command_migrate_references)
@@ -876,6 +963,10 @@ def main() -> None:
     fetch.add_argument("--max-chars", type=int, default=12000, help="Предельный объём текста фрагментов")
     fetch.add_argument("--format", choices=("json",), default="json")
     fetch.set_defaults(func=command_fetch)
+    batch = commands.add_parser("fetch-batch", help="До восьми запросов фрагментов с общим лимитом текста")
+    batch.add_argument("requests", help="YAML: requests: [{document: id, clauses: ['1.2'], pages: [3], query: ...}]")
+    batch.add_argument("--max-chars", type=int, default=16000)
+    batch.set_defaults(func=command_fetch_batch)
     context = commands.add_parser("archive-context", help="Собрать компактный контекст для Архивария")
     context.add_argument("stage_id")
     context.add_argument("--query", help="Запрос для поиска возможных дублей")
@@ -918,7 +1009,37 @@ def main() -> None:
     route_check.add_argument("--input-tokens", type=int)
     route_check.add_argument("--output-tokens", type=int)
     route_check.add_argument("--latency-ms", type=int)
+    route_check.add_argument("--actual-model")
+    route_check.add_argument("--generation-ms", type=float)
+    route_check.add_argument("--retrieval-ms", type=float)
     route_check.set_defaults(func=command_route_check)
+    finish = commands.add_parser("finish", help="Проверить итоговый ответ и однократно учесть документы")
+    finish.add_argument("run_id")
+    finish.add_argument("--answer", required=True)
+    finish.add_argument("--contract", required=True)
+    finish.add_argument("--input")
+    finish.add_argument("--input-tokens", type=int)
+    finish.add_argument("--output-tokens", type=int)
+    finish.add_argument("--latency-ms", type=int)
+    finish.add_argument("--actual-model")
+    finish.add_argument("--generation-ms", type=float)
+    finish.add_argument("--retrieval-ms", type=float)
+    finish.add_argument("--used", action="append", default=[])
+    finish.add_argument("--missing", action="append", default=[])
+    finish.set_defaults(func=command_finish)
+    evidence = commands.add_parser("evidence-check", help="Проверить цитаты и получить хеши для независимой проверки смысла")
+    evidence.add_argument("--answer", required=True)
+    evidence.add_argument("--contract", required=True)
+    evidence.set_defaults(func=command_evidence_check)
+    review = commands.add_parser("review-priorities", help="Приоритет экспертной проверки по реальному использованию")
+    review.add_argument("--limit", type=int, default=20)
+    review.set_defaults(func=command_review_priorities)
+    quality = commands.add_parser("quality-status", help="Качество источников, gate и измеренная телеметрия")
+    quality.set_defaults(func=command_quality_status)
+    impact = commands.add_parser("training-impact", help="Зависимости вопросов и кейсов от редакций документов")
+    impact.set_defaults(func=command_training_impact)
+    identity = commands.add_parser("evaluation-identity", help="Текущие хеши плагина и корпуса для сравнения моделей")
+    identity.set_defaults(func=lambda args: print_json(evaluation_identity(ROOT)))
     route_escalate = commands.add_parser("route-escalate", help="Один раз повысить уровень после провала проверки")
     route_escalate.add_argument("run_id")
     route_escalate.set_defaults(func=command_route_escalate)
@@ -946,7 +1067,19 @@ def main() -> None:
     doctor.set_defaults(func=command_doctor)
     args = parser.parse_args()
     try:
-        args.func(args)
+        mutations = {"apply", "sync", "rebuild-index", "migrate-references", "stage", "intake", "validate", "repair-extraction"}
+        if args.command in mutations:
+            with exclusive_file_lock(ROOT / ".locks" / "apply.lock", f"kb {args.command}"):
+                args.func(args)
+                if args.command in {"apply", "sync", "rebuild-index", "migrate-references"} and not getattr(args, "dry_run", False):
+                    try:
+                        with exclusive_file_lock(STATE_ROOT / ".locks" / "document-usage.lock", "refresh usage"):
+                            refresh_document_usage(STATE_ROOT, ROOT)
+                    except Exception as error:
+                        raise RuntimeError("База обновлена, но статус счётчиков не сохранён; после устранения ошибки повторите sync, не apply. " + str(error)) from error
+        else:
+            with pin_indexes(ROOT):
+                args.func(args)
     except Exception as error:
         print(f"ОШИБКА: {error}", file=sys.stderr)
         raise SystemExit(2) from error

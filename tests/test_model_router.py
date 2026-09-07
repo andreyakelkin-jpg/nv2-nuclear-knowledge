@@ -16,7 +16,7 @@ SCRIPTS = PLUGIN_ROOT / "scripts"
 KB_SCRIPT = SCRIPTS / "kb.py"
 sys.path.insert(0, str(SCRIPTS))
 
-from model_router import assess_route, non_inferiority_gate, validate_answer_text  # noqa: E402
+from model_router import assess_route, evaluation_identity, non_inferiority_gate, validate_answer_text  # noqa: E402
 from eval_routing import evaluate  # noqa: E402
 
 
@@ -110,9 +110,11 @@ class RoutingCliTests(unittest.TestCase):
         self.state.mkdir(parents=True)
         for directory in ("docs", "raw", "normalized", "meta", "reports/model-routing"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
-        self._write_yaml(self.root / "meta/documents.yaml", {"documents": []})
+        self._write_yaml(self.root / "meta/documents.yaml", {"documents": [{"id": "np-104-18"}]})
         self._write_yaml(self.root / "meta/corpus-manifest.yaml", {"schema_version": 2})
-        self._write_yaml(self.root / "reports/model-routing/gate-latest.yaml", {"status": "passed"})
+        self._write_yaml(self.root / "reports/model-routing/gate-latest.yaml", {
+            "status": "passed", "identity": evaluation_identity(self.root),
+        })
         self.config = temporary_root / "config.yaml"
         self._write_yaml(self.config, {
             "kb_root": str(self.root),
@@ -189,7 +191,9 @@ class RoutingCliTests(unittest.TestCase):
         answer = self.root / "accepted.txt"
         answer.write_text("Проверенный ответ с источником np-104-18.", encoding="utf-8")
         contract = self.root / "accepted-contract.yaml"
-        self._write_yaml(contract, {"min_chars": 20, "evidence_ids": ["np-104-18"]})
+        self._write_yaml(contract, {
+            "min_chars": 20, "evidence_ids": ["np-104-18"], "evidence_mode": "metadata",
+        })
         checked = self.cli("route-check", route["run_id"], "--answer", str(answer), "--contract", str(contract))
         self.assertTrue(checked["accepted"])
         claimed = self.cli("route-claim", route["run_id"], "--operation-id", "write-card-1")

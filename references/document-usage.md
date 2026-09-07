@@ -21,7 +21,8 @@ user identity, or an explanation of why the document was needed.
 
 ## Record one answer
 
-Run the command below immediately before the final response. Repeat `--used` and `--missing` for every
+Prefer `kb finish` from the routing protocol to validate and count in one call. The standalone command
+below is for an answer already validated with `route-check`. Repeat `--used` and `--missing` for every
 document; omit either option when that list is empty. Name an exact edition when the edition matters.
 
 ```text
@@ -33,6 +34,13 @@ It increments two simple per-answer counters, ignores only a repeated write with
 refreshes the single UTF-8 Excel-compatible table `meta/document-usage.csv`.
 Each document has `used_count` and `potential_count`; the remaining columns provide status, dates, and
 technical idempotency keys.
+Technical IDs are retained privately in the same row, so retry A after a later write B does not recount A.
+Legacy last-ID rows preserve their counters and known ID; unavailable older IDs cannot be reconstructed.
+No extra business table, reason field, user identity, or question text is added.
+
+After loading a document, `sync`, `rebuild-index`, and `apply` refresh its status without resetting either
+counter. The old potential count remains history; later answers increase used_count. A removed document
+becomes unavailable again. Exact editions stay separate; a replacement is not the cited old edition.
 
 If no document was used and no specific missing document can be named, do not invent a row.
 

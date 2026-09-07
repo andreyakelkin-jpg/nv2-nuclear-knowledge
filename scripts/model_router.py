@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import re
 import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,8 @@ from typing import Any
 import yaml
 
 from kb_root import read_config, resolve_state_root, update_config
+from index_store import atomic_write, index_path
+from evidence_validation import validate_evidence
 
 
 LEVELS = {"low": 0, "medium": 1, "high": 2}
@@ -26,9 +30,10 @@ DEFAULT_ROUTING = {
     "enabled": False,
     "require_quality_gate": True,
     "non_inferiority_margin": 0.05,
-    "minimum_eval_cases": 12,
+    "minimum_eval_cases": 30,
 }
 TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+_SOURCE_HASHES: dict[str, tuple[tuple[int, int], str]] = {}
 
 
 def utc_now() -> str:
@@ -43,15 +48,46 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def write_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100), encoding="utf-8")
+    atomic_write(path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100).encode("utf-8"))
+
+
+def evaluation_identity(root: Path) -> dict[str, str]:
+    plugin = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for path in sorted([*plugin.joinpath("scripts").glob("*.py"), *plugin.joinpath("skills").rglob("*.md"), *plugin.joinpath("references").glob("*.md")]):
+        digest.update(path.relative_to(plugin).as_posix().encode())
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    from retrieval import read_yaml as read_registry
+    manifest = read_registry(index_path(root, "meta/corpus-manifest.yaml"))
+    stable_manifest = {key: value for key, value in manifest.items() if key not in {"last_indexed_at", "retrieval_index"}}
+    documents = read_registry(index_path(root)).get("documents", [])
+    corpus = hashlib.sha256(json.dumps(stable_manifest, sort_keys=True, ensure_ascii=False, default=str).encode())
+    for document in sorted(documents, key=lambda item: str(item.get("id"))):
+        stable = {key: value for key, value in document.items() if key != "indexed_at"}
+        corpus.update(json.dumps(stable, sort_keys=True, ensure_ascii=False, default=str).encode())
+        candidate = (root / str(document.get("normalized_path") or "")).resolve()
+        if root.resolve() not in candidate.parents or not candidate.is_file():
+            corpus.update(b"normalized_source_missing")
+            continue
+        stat = candidate.stat()
+        stat_key = (stat.st_mtime_ns, stat.st_size)
+        cached = _SOURCE_HASHES.get(str(candidate))
+        if not cached or cached[0] != stat_key:
+            cached = (stat_key, hashlib.sha256(candidate.read_bytes()).hexdigest())
+            if len(_SOURCE_HASHES) > 1024:
+                _SOURCE_HASHES.clear()
+            _SOURCE_HASHES[str(candidate)] = cached
+        corpus.update(cached[1].encode())
+    return {"plugin_sha256": digest.hexdigest(), "corpus_sha256": corpus.hexdigest()}
 
 
 def _routing_config() -> dict[str, Any]:
     configured = read_config().get("routing", {})
     if not isinstance(configured, dict):
         configured = {}
-    return {**DEFAULT_ROUTING, **configured}
+    result = {**DEFAULT_ROUTING, **configured}
+    result["minimum_eval_cases"] = max(30, int(result["minimum_eval_cases"]))
+    return result
 
 
 def _gate_path(root: Path) -> Path:
@@ -78,19 +114,21 @@ def _append_event(root: Path, event: dict[str, Any]) -> None:
 def routing_status(root: Path) -> dict[str, Any]:
     config = _routing_config()
     gate = read_yaml(_gate_path(root))
-    gate_passed = gate.get("status") == "passed"
+    gate_current = gate.get("identity") == evaluation_identity(root)
+    gate_passed = gate.get("status") == "passed" and gate_current
     effective = bool(config["enabled"]) and (gate_passed or not config["require_quality_gate"])
     reason = "enabled"
     if not config["enabled"]:
         reason = "feature_flag_disabled"
     elif config["require_quality_gate"] and not gate_passed:
-        reason = "quality_gate_not_passed"
+        reason = "quality_gate_stale" if gate.get("status") == "passed" and not gate_current else "quality_gate_not_passed"
     return {
         "configured_enabled": bool(config["enabled"]),
         "effective_enabled": effective,
         "reason": reason,
         "require_quality_gate": bool(config["require_quality_gate"]),
         "gate": gate or None,
+        "gate_current": gate_current,
         "fallback": TIERS[2],
     }
 
@@ -289,7 +327,7 @@ def _estimate_tokens(text: str) -> int:
     return max(1, round(len(TOKEN_PATTERN.findall(text)) * 1.35)) if text else 0
 
 
-def validate_answer_text(answer: str, contract: dict[str, Any]) -> dict[str, Any]:
+def validate_answer_text(answer: str, contract: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
     failures: dict[str, list[str]] = {"completeness": [], "factual_grounding": [], "format": [], "requirements": []}
     if len(answer.strip()) < int(contract.get("min_chars", 1)):
         failures["completeness"].append("answer_too_short")
@@ -314,8 +352,14 @@ def validate_answer_text(answer: str, contract: dict[str, Any]) -> dict[str, Any
             failures["format"].append("invalid_json")
     elif expected_format not in {"text", "markdown"}:
         failures["format"].append(f"unsupported_contract_format:{expected_format}")
+    source_validation = None
+    if root is not None:
+        source_validation = validate_evidence(root, answer, contract)
+        failures["factual_grounding"].extend(source_validation["failures"])
+    elif contract.get("evidence_ids") or contract.get("evidence"):
+        failures["factual_grounding"].append("source_validation_requires_corpus")
     checks = {name: not items for name, items in failures.items()}
-    return {"passed": all(checks.values()), "checks": checks, "failures": failures}
+    return {"passed": all(checks.values()), "checks": checks, "failures": failures, "evidence": source_validation}
 
 
 def check_route(
@@ -328,6 +372,9 @@ def check_route(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     latency_ms: int | None = None,
+    actual_model: str | None = None,
+    generation_ms: float | None = None,
+    retrieval_ms: float | None = None,
 ) -> dict[str, Any]:
     state_path = _run_path(root, run_id)
     state = read_yaml(state_path)
@@ -337,11 +384,18 @@ def check_route(
         raise ValueError("Routing run уже завершён; повторная проверка запрещена")
     answer = answer_path.read_text(encoding="utf-8")
     contract = read_yaml(contract_path)
-    validation = validate_answer_text(answer, contract)
+    for value in (input_tokens, output_tokens, latency_ms, generation_ms, retrieval_ms):
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError("Tokens and timings must be finite nonnegative numbers")
+    if state["route"]["assessment"].get("criticality") == "high":
+        contract = {**contract, "require_semantic_review": True}
+    validation_started = time.perf_counter()
+    validation = validate_answer_text(answer, contract, root)
+    validation_ms = round((time.perf_counter() - validation_started) * 1000, 3)
     input_text = input_path.read_text(encoding="utf-8") if input_path else ""
-    resolved_input_tokens = input_tokens if input_tokens is not None else _estimate_tokens(input_text)
+    resolved_input_tokens = input_tokens if input_tokens is not None else _estimate_tokens(input_text) if input_path else None
     resolved_output_tokens = output_tokens if output_tokens is not None else _estimate_tokens(answer)
-    token_source = "reported" if input_tokens is not None and output_tokens is not None else "estimated"
+    token_source = "reported" if input_tokens is not None and output_tokens is not None else "estimated" if input_path else "partial"
     if latency_ms is None:
         started = datetime.fromisoformat(str(state["started_at"]))
         measured_latency = max(0, round((datetime.now(timezone.utc) - started).total_seconds() * 1000))
@@ -357,10 +411,15 @@ def check_route(
         "tokens": {
             "input": resolved_input_tokens,
             "output": resolved_output_tokens,
-            "total": resolved_input_tokens + resolved_output_tokens,
+            "total": resolved_input_tokens + resolved_output_tokens if resolved_input_tokens is not None else None,
             "source": token_source,
+            "input_source": "reported" if input_tokens is not None else "estimated" if input_path else "unavailable",
+            "output_source": "reported" if output_tokens is not None else "estimated",
         },
         "latency_ms": measured_latency,
+        "actual_model": actual_model,
+        "timings_ms": {"total": measured_latency, "generation": generation_ms, "retrieval": retrieval_ms, "validation": validation_ms},
+        "answer_sha256": validation["evidence"]["answer_sha256"],
         "escalation_recommended": escalation,
     })
     write_yaml(state_path, state)
@@ -371,6 +430,7 @@ def check_route(
         "parent_run_id": state.get("parent_run_id"),
         "task_hash": state.get("task_hash"),
         "model": state["route"]["model"],
+        "actual_model": actual_model,
         "effort": state["route"]["effort"],
         "reason": state["route"]["reason"],
         "confidence": state["route"]["confidence"],
@@ -378,6 +438,7 @@ def check_route(
         "validation": validation,
         "tokens": state["tokens"],
         "latency_ms": measured_latency,
+        "timings_ms": state["timings_ms"],
     })
     return {
         "run_id": run_id,
@@ -386,6 +447,8 @@ def check_route(
         "escalate_once": escalation,
         "tokens": state["tokens"],
         "latency_ms": measured_latency,
+        "actual_model": actual_model,
+        "timings_ms": state["timings_ms"],
         "side_effects_allowed": validation["passed"],
     }
 
@@ -517,7 +580,17 @@ def apply_quality_gate(root: Path, comparisons_path: Path) -> dict[str, Any]:
         "evaluated_at": utc_now(),
         "baseline": "gpt-5.6-sol/high",
         "dataset": payload.get("dataset"),
+        "identity": payload.get("identity"),
     })
+    reviews_valid = bool(comparisons) and all(
+        isinstance(item, dict) and item.get("evaluation_source") == "reviewer_grading"
+        and all(isinstance(item.get(f"{side}_review"), dict)
+                and all(item[f"{side}_review"].get(key) for key in ("reviewer_id", "reviewed_at", "rubric_version"))
+                and re.fullmatch(r"[a-f0-9]{64}", str(item[f"{side}_review"].get("answer_sha256", "")))
+                for side in ("routed", "sol")) for item in comparisons
+    )
+    if result["status"] == "passed" and (payload.get("identity") != evaluation_identity(root) or payload.get("evaluation_kind") != "reviewed_answers" or not reviews_valid):
+        result.update(status="failed", reason="current_reviewed_evaluation_required")
     write_yaml(_gate_path(root), result)
     config["enabled"] = result["status"] == "passed"
     update_config({"routing": config})

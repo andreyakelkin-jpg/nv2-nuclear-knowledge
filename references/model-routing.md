@@ -4,6 +4,13 @@ Use this protocol before substantive analysis. It is fail-closed: when routing i
 gate has not passed, model selection is unavailable, or confidence is low, use `gpt-5.6-sol` with `high`
 reasoning.
 
+Administrative `status`, `document-usage`, `demand-priorities`, `review-priorities`, `quality-status`,
+and metadata-only lookups do not need a worker, draft file, routing run, or usage write. Run the bounded
+read-only command and answer directly. Resolve `KB_ROOT` once per task. An evidence-only nested skill
+reuses the outer routing run and returns evidence instead of routing, validating, or counting again.
+Keep the current controlling model when it is already at least as capable as the required fallback;
+do not spawn an identical worker solely to relay its answer. Never label selected tier as actual model.
+
 ## 1. Assess and route
 
 Assess these fields explicitly before selecting a worker:
@@ -65,6 +72,8 @@ min_chars: 1
 required_strings: []
 required_sections: []
 evidence_ids: []
+evidence_mode: none  # none for administrative plans; metadata for card facts; passage for requirements
+evidence: []
 forbidden_strings: []
 format: text  # text | markdown | json
 ```
@@ -77,13 +86,25 @@ easy.
 Save the draft and run:
 
 ```text
-RUNNER kb route-check <run-id> --answer <answer-file> --contract <contract-file> \
-  [--input <input-file>] [--input-tokens N --output-tokens N --latency-ms N]
+RUNNER kb finish <run-id> --answer <answer-file> --contract <contract-file> \
+  [--used <document-id>] [--missing <exact-designation>] \
+  [--input <input-file>] [--input-tokens N --output-tokens N --latency-ms N] \
+  [--actual-model <executed-model>] [--retrieval-ms N --generation-ms N]
 ```
 
-The check covers completeness, evidence IDs, required format, explicit requirements, and forbidden claims.
-Exact runtime token counts take precedence; otherwise the journal marks estimates. The command records
-model, effort, reason, route confidence, escalation, tokens, and latency without storing task text.
+The check covers format and source/quote integrity, not automatic proof of meaning. Normative answers
+must follow [the evidence contract](../skills/query-nuclear-knowledge/references/evidence-contract.md).
+For high criticality, the controller must review every requirement against its complete source context,
+then attest the exact answer/evidence hashes; never create an attestation merely to pass the checker.
+`kb evidence-check --answer FILE --contract FILE` is a read-only way to verify sources and obtain hashes.
+An attestation is a review record, not independent authentication of a human expert.
+
+`finish` records usage only after acceptance. Repeating the identical operation is safe, even after an
+interruption between checking and recording; a changed answer requires a new run. `route-check` remains
+available when usage is not yet ready, followed by `usage-record` with that run ID. Do not use both paths
+to count different versions of one final answer. Omit unknown token counts rather than writing zero.
+Exact runtime counts take precedence; estimates are labeled, unavailable input/total are null. Supply
+actual model only when known. Timings separate retrieval, generation, validation and end-to-end time.
 
 If accepted and the task has side effects, claim the operation before executing it:
 
@@ -101,6 +122,12 @@ effects. A rejected Sol draft is a hard stop requiring clearer evidence or user 
 `kb routing-status` is authoritative. Routing is effective only when both the feature flag and the latest
 paired non-inferiority gate pass. `kb routing-gate <comparisons.yaml>` automatically disables routing when
 the one-sided 95% bootstrap bound falls below the configured margin versus Sol/high.
+The gate must match `kb evaluation-identity` (plugin instructions/code and corpus version). Old gates
+are stale after changes. Only `reviewed_answers` with reviewer scores tied to exact answer hashes can
+enable routing; format-only checks and the pending scenarios in `evals/retrieval-regression.yaml` cannot.
+Capture `dataset.identity` before collecting model answers and reviews; stale datasets cannot be relabeled
+as current by re-running the evaluator. The gate requires at least 30 paired cases.
+Do not claim measured token savings from estimated counts or from unexecuted comparison scenarios.
 
 ## 5. Calibration mode
 

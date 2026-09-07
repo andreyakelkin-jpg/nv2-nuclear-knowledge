@@ -24,5 +24,8 @@ For each normative mention in `references`, record:
 ```
 
 Use `в_базе` only when `target_document` exists. Use a replacement status only with explicit evidence. Preserve old editions required by a contract, ТУ, ОТТ, or КД as `устарел_специфика` and cite that basis.
+An explicit edition/year must match the target exactly. Another available edition is only a candidate
+for separate analysis, never an automatic substitute. Synchronization can unresolve a previously wrong
+family match; preserve documented expert replacement decisions and their basis.
 
 Classify approval orders, amendment decisions, and informative bibliography separately from operational normative documents. They must remain discoverable but must not automatically receive high queue priority.

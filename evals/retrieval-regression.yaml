@@ -1,0 +1,194 @@
+schema_version: 1
+name: nv2-retrieval-regression-pending-review-v1
+status: pending_review
+evaluation_kind: pending_review
+description: >-
+  Набор сценариев для ручной проверки retrieval. Это не набор gold-ответов,
+  не выполненная оценка модели и не вход для quality gate. После запуска оба
+  ответа должны быть оценены reviewer отдельно и привязаны к SHA-256 текста.
+review_protocol:
+  required_evaluation_kind: reviewed_answers
+  require_answer_sha256: true
+  require_current_plugin_and_corpus_identity: true
+  do_not_infer_facts_from_document_id_presence: true
+cases:
+- id: exact-gost-15-016-2016-card
+  scenario_type: exact_edition
+  prompt: Найди карточку ГОСТ 15.016-2016 и сообщи только идентификатор, название и стадию карточки.
+  candidate_document_ids: [gost-15-016-2016]
+  reviewer_focus: Точное обозначение редакции и отсутствие подмены другим ГОСТ 15.
+- id: exact-gost-r-50-05-02-2022-card
+  scenario_type: exact_edition
+  prompt: Найди в базе именно ГОСТ Р 50.05.02-2022; не подменяй его документом другой части серии.
+  candidate_document_ids: [gost-r-50-05-02-2022]
+  reviewer_focus: Exact-match designation versus neighbouring 50.05 records.
+- id: exact-np-068-05-cyrillic
+  scenario_type: exact_edition
+  prompt: Найди НП-068-05 по кириллическому обозначению и верни ID карточки.
+  candidate_document_ids: [np-068-05]
+  reviewer_focus: Сопоставление кириллического обозначения с ID.
+- id: exact-np-068-05-machine-label
+  scenario_type: exact_edition
+  prompt: Найди документ по строке np-068-05 и верни его карточку без создания альтернативного документа.
+  candidate_document_ids: [np-068-05]
+  reviewer_focus: Machine-style alias resolves to the same loaded record.
+- id: exact-np-071-18
+  scenario_type: exact_edition
+  prompt: Найди карточку НП-071-18 и укажи ID и статус, как они записаны в базе.
+  candidate_document_ids: [np-071-18]
+  reviewer_focus: Exact edition, status provenance caveat where present.
+- id: exact-np-071-06
+  scenario_type: exact_edition
+  prompt: Найди НП-071-06 и не заменяй его НП-071-18; верни найденные ID и обозначения.
+  candidate_document_ids: [np-071-06, np-071-18]
+  reviewer_focus: Different explicit editions must stay distinct.
+- id: exact-gost-r-50-04-07-2022
+  scenario_type: exact_edition
+  prompt: Извлеки карточку ГОСТ Р 50.04.07-2022 и дай краткий результат поиска с ID.
+  candidate_document_ids: [gost-r-50-04-07-2022]
+  reviewer_focus: Exact member of a dense document family.
+- id: missing-gost-r-50-05-02-2018
+  scenario_type: missing_document
+  prompt: Проверь, есть ли именно ГОСТ Р 50.05.02-2018. Если нет, сообщи отсутствие, не объявляя ГОСТ Р 50.05.02-2022 заменой.
+  candidate_document_ids: [gost-r-50-05-02-2022]
+  reviewer_focus: Honest absence handling; no edition substitution.
+- id: missing-np-104-17
+  scenario_type: missing_document
+  prompt: Проверь наличие НП-104-17. Не заменяй запрос на НП-104-18 без явного указания границы.
+  candidate_document_ids: [np-104-18]
+  reviewer_focus: Missing edition response and safe nearest-match disclosure.
+- id: missing-gost-15-016-2015
+  scenario_type: missing_document
+  prompt: Проверь наличие ГОСТ 15.016-2015. Не выдавай ГОСТ 15.016-2016 за запрошенную редакцию.
+  candidate_document_ids: [gost-15-016-2016]
+  reviewer_focus: Year-sensitive negative retrieval.
+- id: clause-gost-15-005-86-1-3
+  scenario_type: clause
+  prompt: Найди в карточке ГОСТ 15.005-86 фрагмент, относящийся к пп. 1.3–1.5, и процитируй только найденный фрагмент с привязкой.
+  candidate_document_ids: [gost-15-005-86]
+  reviewer_focus: Clause anchor and no extrapolation beyond retrieved text.
+- id: clause-gost-15-005-86-2-6
+  scenario_type: clause
+  prompt: Найди фрагмент ГОСТ 15.005-86 про изменение ТЗ около пп. 2.6–2.7; если якорь не найден, прямо скажи это.
+  candidate_document_ids: [gost-15-005-86]
+  reviewer_focus: Retrieval-grounded clause handling.
+- id: clause-gost-15-005-86-4-10
+  scenario_type: clause
+  prompt: Проверь, какой фрагмент карточки ГОСТ 15.005-86 относится к пп. 4.10–4.12, и укажи источник.
+  candidate_document_ids: [gost-15-005-86]
+  reviewer_focus: Correct clause/page attribution.
+- id: clause-fz-102-article-5
+  scenario_type: clause
+  prompt: Найди в ФЗ № 102-ФЗ фрагмент, ссылающийся на статью 5, и укажи ID карточки и якорь.
+  candidate_document_ids: [fz-102-fz]
+  reviewer_focus: Article-level retrieval, not legal conclusion.
+- id: clause-fz-223-article-3-6-1
+  scenario_type: clause
+  prompt: Найди в ФЗ № 223-ФЗ фрагмент, помеченный как статья 3, часть 6.1; верни только извлечённую опору.
+  candidate_document_ids: [fz-223-fz]
+  reviewer_focus: Exact subclause citation and page evidence if available.
+- id: page-gost-15-005-86-page-1
+  scenario_type: page_anchor
+  prompt: Извлеки фрагмент ГОСТ 15.005-86 с привязкой к физической странице 1, если она есть в базе.
+  candidate_document_ids: [gost-15-005-86]
+  reviewer_focus: Page anchor is reported only when actually retrieved.
+- id: page-gost-15-005-86-pages-4-5
+  scenario_type: page_anchor
+  prompt: Найди фрагмент ГОСТ 15.005-86 с привязкой к физическим страницам 4–5 и не выдумывай номер страницы.
+  candidate_document_ids: [gost-15-005-86]
+  reviewer_focus: Multi-page anchor fidelity.
+- id: page-fz-223-pages-43-52
+  scenario_type: page_anchor
+  prompt: Проверь, есть ли в карточке ФЗ № 223-ФЗ материал с привязкой к страницам 43–52; покажи найденный фрагмент или отсутствие.
+  candidate_document_ids: [fz-223-fz]
+  reviewer_focus: Page-range retrieval and abstention.
+- id: query-technical-specification-okr
+  scenario_type: semantic_query
+  prompt: Найди документ базы по запросу «содержание и оформление технического задания на ОКР» и верни кандидата с ID.
+  candidate_document_ids: [gost-15-016-2016]
+  reviewer_focus: Query-to-card relevance without unsupported legal claims.
+- id: query-acceptance-products
+  scenario_type: semantic_query
+  prompt: Найди документ по теме испытаний и приемки выпускаемой продукции; верни карточку и её идентификатор.
+  candidate_document_ids: [gost-15-309-98]
+  reviewer_focus: Retrieval of the intended topical card.
+- id: query-welding-nuclear
+  scenario_type: semantic_query
+  prompt: Найди документ базы по сварке и наплавке оборудования атомных энергетических установок.
+  candidate_document_ids: [np-104-18]
+  reviewer_focus: Topical match with traceable ID.
+- id: query-conformity-nuclear
+  scenario_type: semantic_query
+  prompt: Найди карточку о формах оценки соответствия продукции и процессов для объектов использования атомной энергии.
+  candidate_document_ids: [np-071-18]
+  reviewer_focus: Retrieval relevance; reviewer checks factual phrasing separately.
+- id: query-measurement-unity
+  scenario_type: semantic_query
+  prompt: Найди в базе закон о единстве измерений и верни идентификатор карточки.
+  candidate_document_ids: [fz-102-fz]
+  reviewer_focus: Correct source identification.
+- id: ambiguity-gost-15-series
+  scenario_type: ambiguity
+  prompt: Пользователь спрашивает «ГОСТ 15 по ТЗ». Покажи, какие уточнения нужны между карточками ГОСТ 15.005-86 и ГОСТ 15.016-2016.
+  candidate_document_ids: [gost-15-005-86, gost-15-016-2016]
+  reviewer_focus: Ambiguity disclosed; no arbitrary source selection.
+- id: ambiguity-np-071-family
+  scenario_type: ambiguity
+  prompt: "Запрос «НП-071» без года: покажи доступные совпадения и попроси уточнить редакцию."
+  candidate_document_ids: [np-071-06, np-071-18]
+  reviewer_focus: Family ambiguity and edition safety.
+- id: ambiguity-gost-r-50-04-family
+  scenario_type: ambiguity
+  prompt: "Запрос «ГОСТ Р 50.04» без части и года: перечисли релевантные карточки, не выбирая одну без основания."
+  candidate_document_ids: [gost-r-50-04-01-2025, gost-r-50-04-02-2018, gost-r-50-04-07-2022]
+  reviewer_focus: Dense family ambiguity, bounded candidate list.
+- id: comparison-np-089-15-np-104-18
+  scenario_type: comparison
+  prompt: Сопоставь найденные карточки НП-089-15 и НП-104-18 только по их областям применения, указав IDs и границу вывода.
+  candidate_document_ids: [np-089-15, np-104-18]
+  reviewer_focus: Two-source attribution and no interchangeability claim without support.
+- id: comparison-gost-15-005-86-gost-15-016-2016
+  scenario_type: comparison
+  prompt: Сравни карточки ГОСТ 15.005-86 и ГОСТ 15.016-2016 по видимой области применения; приведи источники.
+  candidate_document_ids: [gost-15-005-86, gost-15-016-2016]
+  reviewer_focus: Correctly separated scopes and editions.
+- id: metadata-status-gost-15-016
+  scenario_type: metadata
+  prompt: Верни статус и stage карточки ГОСТ 15.016-2016 ровно как записано, с ID.
+  candidate_document_ids: [gost-15-016-2016]
+  reviewer_focus: Metadata fidelity and verification caveat.
+- id: metadata-source-pages-gost-15-016
+  scenario_type: metadata
+  prompt: Найди поле source.pages в карточке ГОСТ 15.016-2016; если поле доступно, верни значение и ID.
+  candidate_document_ids: [gost-15-016-2016]
+  reviewer_focus: Structured metadata retrieval, no invented page count.
+- id: metadata-relations-gost-15-016
+  scenario_type: metadata
+  prompt: Найди связанные документы в карточке ГОСТ 15.016-2016 и верни только явно указанные ID.
+  candidate_document_ids: [gost-15-016-2016, gost-r-15-301-2016]
+  reviewer_focus: Relation retrieval versus inferred linkage.
+- id: metadata-verification-fz-102
+  scenario_type: metadata
+  prompt: Покажи verification и lifecycle поля карточки ФЗ № 102-ФЗ, не превращая их в официальный правовой вывод.
+  candidate_document_ids: [fz-102-fz]
+  reviewer_focus: Status/provenance boundary.
+- id: missing-identifier-no-nearest-match
+  scenario_type: missing_document
+  prompt: Проверь наличие документа с ID gost-r-50-05-02-2018; при отсутствии не создавай ID и не выдавай ближайшую карточку за точное совпадение.
+  candidate_document_ids: [gost-r-50-05-02-2022]
+  reviewer_focus: Exact ID absence and no synthetic record.
+- id: ambiguity-pp-rf-544
+  scenario_type: ambiguity
+  prompt: Найди постановление Правительства РФ № 544 и укажи, какие дополнительные данные нужны, если пользователь не назвал год.
+  candidate_document_ids: [pp-rf-544-2016]
+  reviewer_focus: Number/year ambiguity and identity disclosure.
+- id: query-design-documentation
+  scenario_type: semantic_query
+  prompt: Найди документ по теме «технические условия в составе комплекта конструкторской документации» и верни найденную карточку с ID.
+  candidate_document_ids: [gost-2-114-2016]
+  reviewer_focus: Search relevance; if no candidate is retrieved, review abstention rather than guessed answer.
+- id: query-material-test-method
+  scenario_type: semantic_query
+  prompt: Найди карточку ГОСТ 1497-2023 и предоставь только ID, название и найденный статус.
+  candidate_document_ids: [gost-1497-2023]
+  reviewer_focus: Exact retrieval and metadata fidelity.

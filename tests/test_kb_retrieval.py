@@ -169,6 +169,18 @@ class RetrievalCliTests(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertLessEqual(len(result["excerpts"][0]["text"]), 500)
 
+    def test_fetch_batch_enforces_one_global_excerpt_budget(self) -> None:
+        requests = self.root / "batch.yaml"
+        requests.write_text(yaml.safe_dump({"requests": [
+            {"document": "gost-1-2-2024", "clauses": ["1"]},
+            {"document": "gost-1-2-2024", "clauses": ["1.1"]},
+        ]}, allow_unicode=True), encoding="utf-8")
+        result = self.run_cli("fetch-batch", str(requests), "--max-chars", "600")
+        excerpt_chars = sum(len(item["text"]) for entry in result["results"] for item in entry.get("excerpts", []))
+        self.assertLessEqual(excerpt_chars, 600)
+        self.assertEqual("batch_budget_exhausted", result["results"][1]["error"])
+        self.assertFalse(result["complete"])
+
     def test_archive_context_does_not_emit_full_registries(self) -> None:
         result = self.run_cli(
             "archive-context", "stage-1", "--reference", "ГОСТ 1.2-2024", "--max-chars", "5000"
@@ -204,6 +216,68 @@ class RetrievalCliTests(unittest.TestCase):
             if path.is_file()
         }
         self.assertEqual(before, after)
+
+    def test_writer_lock_rejects_sync_rebuild_and_migration_from_another_process(self) -> None:
+        scripts = PLUGIN_ROOT / "scripts"
+        lock_path = self.root / ".locks" / "apply.lock"
+        holder_code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(scripts)!r})\n"
+            "from pathlib import Path\n"
+            "from write_lock import exclusive_file_lock\n"
+            f"with exclusive_file_lock(Path({str(lock_path)!r}), 'test holder'):\n"
+            " print('locked', flush=True)\n"
+            " sys.stdin.readline()\n"
+        )
+        environment = os.environ.copy()
+        environment["PYTHONUTF8"] = "1"
+        holder = subprocess.Popen(
+            [sys.executable, "-c", holder_code], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", env=environment,
+        )
+        try:
+            self.assertEqual("locked", holder.stdout.readline().strip())
+            for command in ("sync", "rebuild-index", "migrate-references"):
+                with self.subTest(command=command):
+                    env = os.environ.copy()
+                    env.update({"NV2_NUCLEAR_KB_ROOT": str(self.root), "NV2_NUCLEAR_STATE_ROOT": str(self.state), "PYTHONUTF8": "1"})
+                    completed = subprocess.run(
+                        [sys.executable, str(KB_SCRIPT), command], capture_output=True, text=True,
+                        encoding="utf-8", env=env,
+                    )
+                    self.assertNotEqual(0, completed.returncode)
+                    self.assertIn("Другой writer", completed.stdout + completed.stderr)
+        finally:
+            if holder.stdin:
+                holder.stdin.write("\n")
+                holder.stdin.flush()
+            holder.wait(timeout=10)
+            if holder.stdin:
+                holder.stdin.close()
+            if holder.stdout:
+                holder.stdout.close()
+            if holder.stderr:
+                holder.stderr.close()
+
+    def test_invalid_rebuild_keeps_active_generation_and_pointer(self) -> None:
+        pointer = self.root / "meta" / "index-current.json"
+        original_pointer = pointer.read_bytes()
+        generation = json.loads(original_pointer.decode("utf-8"))["generation"]
+        active_documents = self.root / "meta" / "index-generations" / generation / "documents.yaml"
+        original_documents = active_documents.read_bytes()
+        card = self.root / "docs/design/gost/gost-1-2-2024.md"
+        metadata = yaml.safe_load(card.read_text(encoding="utf-8").split("---", 2)[1])
+        metadata["category"] = ["invalid-category"]
+        card.write_text("---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False) + "---\n# bad\n", encoding="utf-8")
+        environment = os.environ.copy()
+        environment.update({"NV2_NUCLEAR_KB_ROOT": str(self.root), "NV2_NUCLEAR_STATE_ROOT": str(self.state), "PYTHONUTF8": "1"})
+        completed = subprocess.run(
+            [sys.executable, str(KB_SCRIPT), "rebuild-index"], capture_output=True, text=True,
+            encoding="utf-8", env=environment,
+        )
+        self.assertNotEqual(0, completed.returncode)
+        self.assertEqual(original_pointer, pointer.read_bytes())
+        self.assertEqual(original_documents, active_documents.read_bytes())
 
 
 if __name__ == "__main__":

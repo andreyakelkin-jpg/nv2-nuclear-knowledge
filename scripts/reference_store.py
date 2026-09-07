@@ -23,7 +23,7 @@ def utc_now() -> str:
 def read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     return loaded if isinstance(loaded, dict) else {}
 
 
@@ -38,7 +38,7 @@ def _front_matter(path: Path) -> tuple[dict[str, Any], str]:
     end = text.find("\n---\n", 4)
     if end < 0:
         raise ValueError(f"Не закрыт YAML-фронтматтер: {path}")
-    metadata = yaml.safe_load(text[4:end]) or {}
+    metadata = yaml.load(text[4:end], Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)) or {}
     if not isinstance(metadata, dict):
         raise ValueError(f"YAML-фронтматтер должен быть объектом: {path}")
     return metadata, text[end + 5:]

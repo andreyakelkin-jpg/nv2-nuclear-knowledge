@@ -91,7 +91,9 @@ def canonical_identifier(label: str) -> tuple[str | None, str | None]:
 
 
 def identifier_from_id(doc_id: str) -> tuple[str | None, str | None]:
-    value = doc_id.lower()
+    # IDs are canonical storage keys, not a display designation.  Preserve dots in
+    # ГОСТ numbers and split only on their final edition suffix.
+    value = normalize(doc_id).lower()
     patterns = [
         (r"^gost-r-(.+)-(\d{2,4})$", "gost-r"),
         (r"^gost-(.+)-(\d{2,4})$", "gost"),
@@ -178,8 +180,10 @@ def _write_document(path: Path, metadata: dict[str, Any], body: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _document_maps(root: Path) -> tuple[dict[str, str], dict[str, list[str]], set[str]]:
-    exact: dict[str, str] = {}
+def _document_maps(root: Path) -> tuple[dict[str, str | None], dict[str, list[str]], set[str]]:
+    # ``None`` is an intentional collision sentinel: an exact designation must
+    # never choose whichever duplicate happened to be scanned last.
+    exact: dict[str, str | None] = {}
     families: dict[str, list[str]] = defaultdict(list)
     ids: set[str] = set()
     for path in (root / "docs").rglob("*.md"):
@@ -193,17 +197,29 @@ def _document_maps(root: Path) -> tuple[dict[str, str], dict[str, list[str]], se
             if metadata.get(field):
                 keys.append(canonical_identifier(str(metadata[field])))
         for exact_key, family_key in keys:
-            if exact_key:
-                exact[exact_key] = doc_id
+            # A key without an edition is a family key, even though the parser
+            # returns it in both tuple positions.  It must be resolved only via
+            # the family cardinality below, not by last-write-wins exact lookup.
+            if exact_key and exact_key != family_key:
+                if exact_key not in exact:
+                    exact[exact_key] = doc_id
+                elif exact[exact_key] != doc_id:
+                    exact[exact_key] = None
             if family_key and doc_id not in families[family_key]:
                 families[family_key].append(doc_id)
     return exact, families, ids
 
 
-def resolve_label(label: str, exact: dict[str, str], families: dict[str, list[str]]) -> tuple[str | None, str, str | None]:
+def resolve_label(label: str, exact: dict[str, str | None], families: dict[str, list[str]]) -> tuple[str | None, str, str | None]:
     exact_key, family_key = canonical_identifier(label)
-    if exact_key and exact_key in exact:
+    if exact_key and exact.get(exact_key):
         return exact[exact_key], "canonical_exact", exact_key
+    if exact_key and exact_key in exact and exact[exact_key] is None:
+        return None, "ambiguous_exact", exact_key
+    # A stated edition is a hard constraint.  Do not silently turn a missing
+    # ГОСТ ...-2099 into whichever edition happens to be in the KB.
+    if exact_key and family_key and exact_key != family_key:
+        return None, "missing_explicit_edition", exact_key
     if family_key and len(families.get(family_key, [])) == 1:
         return families[family_key][0], "canonical_unique_family", family_key
     return None, "unresolved", exact_key or family_key
@@ -266,11 +282,30 @@ def synchronize_references(root: Path, write: bool = True) -> dict[str, Any]:
                 reference["action"] = "Повторно идентифицировать документ: указанная цель отсутствует в базе."
                 changed = True
                 repaired += 1
+            elif status == "в_базе" and method == "missing_explicit_edition":
+                # A formerly resolved target from the same family but another
+                # edition is a false positive.  Retain human-authored evidence,
+                # but stop presenting it as an in-base resolution.
+                current_exact, current_family = identifier_from_id(str(current_target or ""))
+                _label_exact, label_family = canonical_identifier(label)
+                if current_target and current_family == label_family:
+                    reference["status"] = "отсутствует"
+                    reference.pop("target_document", None)
+                    reference["requires_analysis"] = True
+                    reference["confidence"] = "low"
+                    reference["resolution_method"] = "missing_explicit_edition"
+                    reference["resolution_warning"] = (
+                        "Запрошенная редакция отсутствует в базе; прежняя цель относилась к другой редакции."
+                    )
+                    changed = True
+                    repaired += 1
             if not reference.get("confidence"):
                 reference["confidence"] = "not_assessed"
                 changed = True
-            if canonical and len(families.get(canonical, [])) > 1 and not target:
-                ambiguous.append({"source": str(metadata.get("id")), "label": label, "family": canonical})
+            if not target and method in {"unresolved", "missing_explicit_edition", "ambiguous_exact"}:
+                family_key = canonical_identifier(label)[1]
+                if family_key and families.get(family_key):
+                    ambiguous.append({"source": str(metadata.get("id")), "label": label, "family": family_key})
         if changed:
             changed_docs += 1
             if write:

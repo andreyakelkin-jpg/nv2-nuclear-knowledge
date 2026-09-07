@@ -16,7 +16,8 @@ drafting may use Terra/medium; admission decisions, critical-error rules, and un
 are high-criticality and route to Sol/high.
 
 1. Define role, operation, competence, risk, initial level, and admission consequence.
-2. Use `$query-nuclear-knowledge` to select evidence. Generate formal assessment content only from expert-reviewed or approved sources; otherwise label it as a pilot draft.
+2. Use `$query-nuclear-knowledge` to select evidence under the existing run, without nested routing or
+   counters. Generate formal content only from expert-reviewed or approved sources; otherwise use pilot mode.
 3. Build the chain `role → competence → operation → risk → normative clause → task`.
 4. Use the templates under `KB_ROOT/training/` and [references/assessment-contract.md](references/assessment-contract.md).
 5. Include knowledge questions, document-navigation tasks, and realistic cases.
@@ -28,4 +29,7 @@ are high-criticality and route to Sol/high.
 
 For deterministic scoring, run `RUNNER assess <assignment> <answers>`.
 
-When a source changes, use the impact index to identify affected questions, personnel, and retraining dates.
+When a source changes, run `kb training-impact` to identify directly affected questions/cases. Personnel
+and retraining decisions still require the assignment history and an authorized assessor; they are not
+inferred from a document link. Reports pin source hashes and lifecycle. Pilot/unreviewed or changed-source
+results require review and cannot become a formal pass. Prefer `kb finish` for the outer final answer.
