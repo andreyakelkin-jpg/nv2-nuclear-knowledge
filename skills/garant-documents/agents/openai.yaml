@@ -1,0 +1,6 @@
+interface:
+  display_name: "ГАРАНТ — документы и актуальность"
+  short_description: "Загрузка и проверка документов по явному запросу"
+  default_prompt: "Используй $garant-documents: найди указанный документ в ГАРАНТ, проверь его статус и добавь в базу знаний."
+policy:
+  allow_implicit_invocation: false

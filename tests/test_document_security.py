@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 
 import yaml
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import DecodedStreamObject, NameObject, RectangleObject
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -213,6 +215,68 @@ class DocumentSecurityCliTests(unittest.TestCase):
         source.write_bytes(b"%PDF-1.7\n1 0 obj<</OpenAction 2 0 R /JavaScript(test)>>endobj\n%%EOF")
         checked = self.security_check(source)
         self.assertEqual("security_rejected", checked["verdict"]["status"])
+
+    def test_active_pdf_can_be_sanitized_and_then_staged(self) -> None:
+        source = self.inputs / "active-valid.pdf"
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.add_js("app.alert('test')")
+        writer.add_uri(0, "https://example.invalid", RectangleObject((10, 10, 80, 30)))
+        with source.open("wb") as stream:
+            writer.write(stream)
+        original = source.read_bytes()
+
+        checked = self.security_check(source)
+        self.assertEqual("security_rejected", checked["verdict"]["status"])
+        self.assertTrue(checked["sanitization"]["available"])
+        self.assertIn("pdf_javascript", checked["sanitization"]["finding_codes"])
+        self.assertIn("pdf_external_uri", checked["sanitization"]["finding_codes"])
+
+        sanitized = self.run_json("sanitize-pdf", str(source))
+        sanitized_source = Path(sanitized["sanitized_source"])
+        self.assertTrue(sanitized_source.is_file())
+        self.assertEqual(original, source.read_bytes())
+        self.assertTrue(sanitized["original_preserved"])
+        self.assertTrue(sanitized["text_preserved"])
+        self.assertNotEqual(sanitized["source_sha256"], sanitized["sanitized_sha256"])
+        self.assertGreater(sanitized["removed"]["pdf_javascript"], 0)
+        self.assertGreater(sanitized["removed"]["pdf_external_uri"], 0)
+        self.assertEqual(1, len(PdfReader(str(sanitized_source), strict=True).pages))
+
+        rechecked = self.security_check(sanitized_source)
+        self.assertEqual("security_passed", rechecked["verdict"]["status"])
+        stage_dir = self.stage(sanitized_source)
+        manifest = yaml.safe_load((stage_dir / "manifest.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(sanitized["sanitized_sha256"], manifest["source_sha256"])
+
+    def test_pdf_stream_text_does_not_trigger_raw_marker_false_positive(self) -> None:
+        source = self.inputs / "stream-markers.pdf"
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=200, height=200)
+        content = DecodedStreamObject()
+        content.set_data(b"BT (/JS and /URI are visible text only) Tj ET")
+        page[NameObject("/Contents")] = writer._add_object(content)
+        with source.open("wb") as stream:
+            writer.write(stream)
+
+        checked = self.security_check(source)
+        self.assertEqual("security_passed", checked["verdict"]["status"])
+        self.assertFalse(checked["sanitization"]["available"])
+
+    def test_embedded_file_is_not_automatically_sanitized(self) -> None:
+        source = self.inputs / "embedded.pdf"
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.add_attachment("payload.txt", b"payload")
+        with source.open("wb") as stream:
+            writer.write(stream)
+
+        checked = self.security_check(source)
+        self.assertEqual("security_rejected", checked["verdict"]["status"])
+        self.assertFalse(checked["sanitization"]["available"])
+        sanitized = self.run_raw("sanitize-pdf", str(source))
+        self.assertNotEqual(0, sanitized.returncode)
+        self.assertIn("нельзя автоматически очистить", sanitized.stderr)
 
     def test_unavailable_or_missing_scanner_fails_closed(self) -> None:
         source = self.inputs / "scanner.txt"

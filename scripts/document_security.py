@@ -50,6 +50,7 @@ PDF_REJECT_MARKERS = {
     b"/embeddedfile": "pdf_embedded_file",
     b"/submitform": "pdf_submit_form",
     b"/importdata": "pdf_import_data",
+    b"/gotor": "pdf_remote_goto",
     b"/richmedia": "pdf_rich_media",
 }
 PDF_REVIEW_MARKERS = {
@@ -151,14 +152,18 @@ def _inspect_docx(source: Path, findings: list[dict[str, str]]) -> None:
                 findings.append(_finding("docx_external_relationship", "review_required", "DOCX содержит внешнюю связь"))
 
 
-def inspect_source(source_path: Path) -> dict[str, Any]:
-    source, digest, size = _validate_source(source_path)
-    findings: list[dict[str, str]] = []
-    suffix = source.suffix.lower()
-    content = source.read_bytes()
-    if suffix == ".pdf":
-        if not content.startswith(b"%PDF-"):
-            findings.append(_finding("pdf_magic_mismatch", "rejected", "Расширение PDF не совпадает с сигнатурой файла"))
+def _inspect_pdf(source: Path, content: bytes, findings: list[dict[str, str]]) -> None:
+    """Inspect reachable PDF objects and fall back to raw markers on parse failure."""
+    from pypdf import PdfReader
+    from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
+
+    if not content.startswith(b"%PDF-"):
+        findings.append(_finding("pdf_magic_mismatch", "rejected", "Расширение PDF не совпадает с сигнатурой файла"))
+        return
+    try:
+        reader = PdfReader(str(source), strict=False)
+    except Exception:
+        findings.append(_finding("pdf_invalid_container", "rejected", "PDF не удалось разобрать как корректный контейнер"))
         lowered = content.lower()
         for marker, code in PDF_REJECT_MARKERS.items():
             if marker in lowered:
@@ -166,6 +171,86 @@ def inspect_source(source_path: Path) -> dict[str, Any]:
         for marker, code in PDF_REVIEW_MARKERS.items():
             if marker in lowered:
                 findings.append(_finding(code, "review_required", f"PDF содержит требующий проверки элемент {marker.decode('ascii')}"))
+        return
+
+    if reader.is_encrypted:
+        findings.append(_finding("pdf_encrypted", "review_required", "PDF зашифрован"))
+        return
+
+    key_codes = {
+        "/javascript": ("pdf_javascript", "rejected", "PDF содержит дерево JavaScript"),
+        "/js": ("pdf_javascript", "rejected", "PDF содержит JavaScript-действие"),
+        "/launch": ("pdf_launch_action", "rejected", "PDF содержит Launch-действие"),
+        "/embeddedfile": ("pdf_embedded_file", "rejected", "PDF содержит внедрённый файл"),
+        "/embeddedfiles": ("pdf_embedded_file", "rejected", "PDF содержит дерево внедрённых файлов"),
+        "/submitform": ("pdf_submit_form", "rejected", "PDF содержит SubmitForm-действие"),
+        "/importdata": ("pdf_import_data", "rejected", "PDF содержит ImportData-действие"),
+        "/gotor": ("pdf_remote_goto", "rejected", "PDF содержит внешний переход GoToR"),
+        "/richmedia": ("pdf_rich_media", "rejected", "PDF содержит RichMedia"),
+        "/openaction": ("pdf_open_action", "review_required", "PDF содержит действие открытия"),
+        "/aa": ("pdf_additional_action", "review_required", "PDF содержит дополнительные действия"),
+        "/uri": ("pdf_external_uri", "review_required", "PDF содержит внешний URI"),
+    }
+    action_codes = {
+        "/javascript": ("pdf_javascript", "rejected", "PDF содержит JavaScript-действие"),
+        "/launch": ("pdf_launch_action", "rejected", "PDF содержит Launch-действие"),
+        "/submitform": ("pdf_submit_form", "rejected", "PDF содержит SubmitForm-действие"),
+        "/importdata": ("pdf_import_data", "rejected", "PDF содержит ImportData-действие"),
+        "/gotor": ("pdf_remote_goto", "rejected", "PDF содержит внешний переход GoToR"),
+        "/uri": ("pdf_external_uri", "review_required", "PDF содержит внешний URI"),
+        "/embeddedfile": ("pdf_embedded_file", "rejected", "PDF содержит внедрённый файл"),
+        "/richmedia": ("pdf_rich_media", "rejected", "PDF содержит RichMedia"),
+    }
+    seen_codes: set[str] = set()
+    visited: set[tuple[Any, ...]] = set()
+
+    def add(code: str, severity: str, message: str) -> None:
+        if code not in seen_codes:
+            seen_codes.add(code)
+            findings.append(_finding(code, severity, message))
+
+    def walk(value: Any) -> None:
+        if isinstance(value, IndirectObject):
+            marker = ("indirect", value.idnum, value.generation)
+            if marker in visited:
+                return
+            visited.add(marker)
+            try:
+                value = value.get_object()
+            except Exception:
+                add("pdf_invalid_object", "rejected", "PDF содержит нечитаемый косвенный объект")
+                return
+        if isinstance(value, (DictionaryObject, ArrayObject)):
+            marker = ("object", id(value))
+            if marker in visited:
+                return
+            visited.add(marker)
+        if isinstance(value, ArrayObject):
+            for item in value:
+                walk(item)
+            return
+        if not isinstance(value, DictionaryObject):
+            return
+        for key, nested in list(value.items()):
+            lowered = str(key).lower()
+            if lowered in key_codes:
+                add(*key_codes[lowered])
+            if lowered in {"/s", "/type", "/subtype"}:
+                action = action_codes.get(str(nested).lower())
+                if action:
+                    add(*action)
+            walk(nested)
+
+    walk(reader.trailer)
+
+
+def inspect_source(source_path: Path) -> dict[str, Any]:
+    source, digest, size = _validate_source(source_path)
+    findings: list[dict[str, str]] = []
+    suffix = source.suffix.lower()
+    content = source.read_bytes()
+    if suffix == ".pdf":
+        _inspect_pdf(source, content, findings)
     elif suffix == ".docx":
         _inspect_docx(source, findings)
     else:

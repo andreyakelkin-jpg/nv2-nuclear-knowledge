@@ -53,3 +53,23 @@ scanning, active PDF/DOCX content, or a non-passing semantic result never produc
 Only `security_passed` may proceed to `kb stage`. `security_review_required` remains quarantined until a
 separate authorized review is recorded by the future server maintainer workflow. `security_rejected` remains
 blocked. `kb apply` revalidates the copied report and its digest before it changes a disposable corpus version.
+
+## Automatic PDF sanitization
+
+When `kb security-check` returns `sanitization.available: true`, the deterministic findings consist only
+of supported active PDF actions and both the malware and semantic checks passed. Create a separate cleaned
+copy:
+
+```text
+RUNNER kb sanitize-pdf <source>
+```
+
+The sanitizer removes reachable JavaScript actions, clickable external URI/GoToR transitions,
+OpenAction/AA, Launch, SubmitForm, and ImportData actions. It does not remove printed URL text from page
+content, overwrite the source, accept encrypted PDFs, or bypass unsupported findings such as embedded
+files and RichMedia. It verifies the page count and extracted text before publishing the copy.
+
+Sanitization changes SHA-256. Never reuse either evidence report or the security report from the original.
+Produce fresh scanner and isolated semantic reports for the returned `sanitized_source`, repeat
+`kb security-check`, and pass that exact cleaned path to `kb stage`. If any finding remains, stop
+fail-closed; do not archive the document.

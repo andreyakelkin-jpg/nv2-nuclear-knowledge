@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('kb', 'assess', 'configure', 'doctor')]
+    [ValidateSet('kb', 'assess', 'configure', 'doctor', 'garant')]
     [string]$Action,
 
     [Parameter(ValueFromRemainingArguments = $true)]

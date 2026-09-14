@@ -45,6 +45,7 @@ from model_router import (
     start_route,
     evaluation_identity,
 )
+from pdf_sanitizer import SANITIZABLE_FINDING_CODES, sanitize_pdf
 from reference_resolver import (
     canonical_identifier,
     identifier_from_id,
@@ -246,11 +247,33 @@ def command_security_check(args: argparse.Namespace) -> None:
         Path(args.semantic_report),
         STATE_ROOT,
     )
+    deterministic = payload["checks"]["deterministic"]
+    finding_codes = {str(item.get("code")) for item in deterministic.get("findings", [])}
+    sanitizable_codes = finding_codes & SANITIZABLE_FINDING_CODES
+    unsupported_codes = finding_codes - SANITIZABLE_FINDING_CODES
+    sanitization_available = bool(sanitizable_codes) and not unsupported_codes and all(
+        payload["checks"][name]["status"] == "passed" for name in ("malware", "semantic")
+    )
     print_json({
         "report": str(output),
         "source_sha256": payload["source"]["sha256"],
         "verdict": payload["verdict"],
+        "sanitization": {
+            "available": sanitization_available,
+            "finding_codes": sorted(sanitizable_codes),
+            "requires_fresh_security_evidence": sanitization_available,
+        },
     })
+
+
+def command_sanitize_pdf(args: argparse.Namespace) -> None:
+    print_json(
+        sanitize_pdf(
+            Path(args.source),
+            STATE_ROOT,
+            Path(args.output) if args.output else None,
+        )
+    )
 
 
 def snapshot(paths: list[Path]) -> dict[Path, bytes | None]:
@@ -653,6 +676,10 @@ def _command_apply_locked(args: argparse.Namespace) -> None:
         raise ValueError("Manifest указывает другой security report")
     if manifest.get("security_report_sha256") != sha256_file(security_report_file):
         raise ValueError("Security report был изменён после staging")
+    garant_source = None
+    if getattr(args, "garant_evidence", None):
+        from garant import import_evidence
+        garant_source = import_evidence(Path(args.garant_evidence), STATE_ROOT, manifest["source_sha256"])
     type_slug = type_directory(str(decision["document_type"]))
     destination_md = ROOT / "docs" / category / type_slug / f"{doc_id}.md"
     raw_path = ROOT / "raw" / category / type_slug / f"{doc_id}{source_files[0].suffix.lower()}"
@@ -674,6 +701,8 @@ def _command_apply_locked(args: argparse.Namespace) -> None:
         source = metadata.setdefault("source", {})
         source.update({"original_file": relative(raw_path), "normalized_file": relative(normalized_path),
                        "sha256": manifest["source_sha256"], "extraction_method": manifest["extraction_method"]})
+        if garant_source:
+            source["garant"] = garant_source
         metadata.setdefault("lifecycle", {}).setdefault("stage", "requires_expert_review")
         metadata.setdefault("provenance", {}).update({"stage_id": manifest["stage_id"], "archived_at": now()})
         destination_md.parent.mkdir(parents=True, exist_ok=True)
@@ -935,8 +964,16 @@ def main() -> None:
     security.add_argument("--scanner-report", required=True, help="YAML-отчёт локального антивирусного сканера")
     security.add_argument("--semantic-report", required=True, help="YAML-отчёт Codex без инструментов и side effects")
     security.set_defaults(func=command_security_check)
+    sanitize = commands.add_parser(
+        "sanitize-pdf",
+        help="Создать отдельную PDF-копию без JavaScript, внешних URI и активных действий",
+    )
+    sanitize.add_argument("source")
+    sanitize.add_argument("--output", help="Путь очищенной копии; исходный PDF перезаписать нельзя")
+    sanitize.set_defaults(func=command_sanitize_pdf)
     apply = commands.add_parser("apply", help="Атомарно архивировать решение Архивария")
     apply.add_argument("decision")
+    apply.add_argument("--garant-evidence", help="Bind the archived file to its collected GARANT export evidence")
     apply.add_argument("--replace", action="store_true", help="Разрешить замену существующей карточки")
     apply.set_defaults(func=command_apply)
     rebuild = commands.add_parser("rebuild-index", help="Пересобрать производные реестры")
@@ -1067,7 +1104,7 @@ def main() -> None:
     doctor.set_defaults(func=command_doctor)
     args = parser.parse_args()
     try:
-        mutations = {"apply", "sync", "rebuild-index", "migrate-references", "stage", "intake", "validate", "repair-extraction"}
+        mutations = {"apply", "sync", "rebuild-index", "migrate-references", "stage", "intake", "validate", "repair-extraction", "sanitize-pdf"}
         if args.command in mutations:
             with exclusive_file_lock(ROOT / ".locks" / "apply.lock", f"kb {args.command}"):
                 args.func(args)

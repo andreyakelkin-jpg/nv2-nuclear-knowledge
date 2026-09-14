@@ -14,12 +14,13 @@ ACTIONS = {
     "assess": SCRIPTS_ROOT / "assess_training.py",
     "configure": SCRIPTS_ROOT / "configure.py",
     "doctor": SCRIPTS_ROOT / "doctor.py",
+    "garant": SCRIPTS_ROOT / "garant.py",
 }
 
 
 def usage() -> str:
     return (
-        "usage: run.py <kb|assess|configure|doctor> [arguments...]\n"
+        "usage: run.py <kb|assess|configure|doctor|garant> [arguments...]\n"
         "Run with the same Python 3.10+ interpreter on Windows or Linux."
     )
 

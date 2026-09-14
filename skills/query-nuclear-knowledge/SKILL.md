@@ -5,6 +5,10 @@ description: Search and answer questions from the local nuclear-industry normati
 
 # Query nuclear knowledge
 
+Only when the user explicitly requests GARANT/ГАРАНТ lookup, download or status verification, use
+[GARANT documents](../garant-documents/SKILL.md). Generic currency checks and missing local documents
+do not authorize opening GARANT; ordinary retrieval remains local.
+
 Treat the directory two levels above this skill directory as `PLUGIN_ROOT`. Set `RUNNER` to
 `powershell -NoProfile -ExecutionPolicy Bypass -File PLUGIN_ROOT/scripts/run.ps1` on Windows or
 `sh PLUGIN_ROOT/scripts/run.sh` on Linux. Run `RUNNER kb root` and use the returned absolute path as
